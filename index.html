@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GamerChat - Messagerie Gaming</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+    <div class="container">
+        <!-- Écran de connexion -->
+        <div id="loginScreen" class="screen active">
+            <div class="login-box">
+                <h1 class="game-title">🎮 GAMER CHAT</h1>
+                <p class="subtitle">Connecte-toi pour envoyer des messages à tes amis gamers !</p>                <!-- Mode développement : connexion simple -->
+                <div id="devLogin" class="dev-login">
+                    <input type="text" id="devUsername" placeholder="Entrez votre nom de joueur" maxlength="20">
+                    <button id="devLoginBtn" class="dev-login-btn">
+                        🎮 Entrer dans le jeu
+                    </button>
+                </div>
+                  <!-- Mode production : Google OAuth (à activer après configuration) -->
+                <div id="googleLogin" class="google-login">
+                    <div id="g_id_onload"
+                         data-client_id="YOUR_GOOGLE_CLIENT_ID"
+                         data-context="signin"
+                         data-ux_mode="popup"
+                         data-callback="handleCredentialResponse"
+                         data-auto_prompt="false">
+                    </div>
+                    <div class="g_id_signin"
+                         data-type="standard"
+                         data-shape="rectangular"
+                         data-theme="filled_black"
+                         data-text="signin_with"
+                         data-size="large"
+                         data-logo_alignment="left">
+                    </div>
+                </div>
+                
+                <p class="dev-note">
+                    💡 Mode développement activé - Pour activer Google OAuth, voir README.md
+                </p>
+            </div>
+        </div>
+
+        <!-- Interface de messagerie -->
+        <div id="chatScreen" class="screen hidden">            <header class="chat-header">
+                <div class="user-info">
+                    <img id="userAvatar" src="" alt="Avatar" class="avatar">
+                    <span id="userName">Joueur</span>
+                </div>
+            </header>            <div class="chat-container">
+                <div class="users-list">
+                    <!-- Section recherche d'amis -->
+                    <div class="friends-search-section">
+                        <h3>🔍 Recherche d'amis</h3>
+                        <div class="search-container">
+                            <input type="text" id="friendSearchInput" placeholder="Pseudo d'un ami..." class="friend-search-input">
+                            <button id="searchFriendBtn" class="search-friend-btn">🔎</button>
+                        </div>
+                        <div id="friendRequestsContainer" class="friend-requests hidden">
+                            <!-- Les demandes d'amitié apparaîtront ici -->
+                        </div>
+                    </div>
+                    
+                    <h3>🎮 Joueurs en ligne</h3>
+                    <div id="usersList" class="users"></div>
+                    
+                    <!-- Profil du joueur connecté -->
+                    <div class="user-profile-section" id="userProfileSection">
+                        <img id="currentUserAvatar" src="" alt="Mon Avatar" class="current-user-avatar">
+                        <div class="current-user-info">
+                            <div id="currentUserName" class="current-user-name">Joueur</div>
+                            <div class="current-user-status">🟢 En ligne</div>
+                        </div>
+                        <div class="user-profile-actions">
+                            <button class="profile-action-btn" title="Paramètres">⚙️</button>
+                            <button class="profile-action-btn" id="profileLogoutBtn" title="Déconnexion">🚪</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="chat-area"><div class="chat-header-area hidden" id="chatHeaderArea">
+                        <div class="selected-user-info">
+                            <img id="selectedUserAvatar" src="" alt="Avatar" class="selected-user-avatar">
+                            <div class="selected-user-details">
+                                <h3 id="selectedUserName">Utilisateur</h3>
+                                <p>🟢 En ligne</p>
+                            </div>
+                        </div>                        <div class="chat-actions">
+                            <button class="action-btn">🎮 Profil</button>
+                            <button class="action-btn">⚙️ Options</button>
+                        </div>
+                    </div>
+                    
+                    <div class="chat-messages" id="chatMessages">
+                        <div class="no-chat-selected" id="noChatSelected">
+                            <div class="icon">💬</div>
+                            <p>Sélectionnez un joueur pour commencer une conversation</p>
+                            <p class="no-chat-helper">Cliquez sur un profil à gauche pour démarrer le chat</p>
+                        </div>
+                    </div>
+                    
+                    <div class="message-input-container hidden" id="messageInputContainer">
+                        <input type="text" id="messageInput" placeholder="Tape ton message de gamer..." maxlength="500">
+                        <button id="sendBtn">
+                            <span>⚡</span>
+                        </button>
+                    </div>                </div>
+            </div>
+        </div>
+
+        <!-- Onglets Connexion/Inscription -->
+        <div class="auth-tabs">
+            <button id="loginTab" class="auth-tab active">🔑 Connexion</button>
+            <button id="registerTab" class="auth-tab">📝 Inscription</button>
+        </div>
+
+        <!-- Formulaire de connexion -->
+        <div id="loginForm" class="auth-form">
+            <div class="form-group">
+                <label for="loginEmail">📧 Email</label>
+                <input type="email" id="loginEmail" placeholder="ton.email@exemple.com" class="game-input">
+            </div>
+            <div class="form-group">
+                <label for="loginPassword">🔒 Mot de passe</label>
+                <input type="password" id="loginPassword" placeholder="Ton mot de passe" class="game-input">
+            </div>
+            <button id="loginBtn" class="game-btn">
+                <span class="btn-glow"></span>
+                🚀 Se connecter
+            </button>
+        </div>
+
+        <!-- Formulaire d'inscription -->
+        <div id="registerForm" class="auth-form hidden">
+            <div class="form-group">
+                <label for="registerUsername">🎮 Nom de joueur</label>
+                <input type="text" id="registerUsername" placeholder="TonPseudo" class="game-input" maxlength="20">
+            </div>
+            <div class="form-group">
+                <label for="registerEmail">📧 Email</label>
+                <input type="email" id="registerEmail" placeholder="ton.email@exemple.com" class="game-input">
+            </div>
+            <div class="form-group">
+                <label for="registerPassword">🔒 Mot de passe</label>
+                <input type="password" id="registerPassword" placeholder="Mot de passe sécurisé" class="game-input">
+            </div>
+            <div class="form-group">
+                <label for="confirmPassword">🔒 Confirmer mot de passe</label>
+                <input type="password" id="confirmPassword" placeholder="Confirme ton mot de passe" class="game-input">
+            </div>
+            <button id="registerBtn" class="game-btn">
+                <span class="btn-glow"></span>
+                ✨ Créer un compte
+            </button>
+        </div>
+
+        <div class="auth-note">
+            <p>💡 Système d'authentification sécurisé</p>
+            <p>Tes données sont protégées !</p>
+        </div>
+
+        <!-- Menu contextuel pour les messages -->
+        <div id="contextMenu" class="context-menu">
+            <div class="context-menu-item" id="editMessage">
+                <span class="icon">✏️</span>
+                <span>Modifier le message</span>
+            </div>
+            <div class="context-menu-item delete" id="deleteMessage">
+                <span class="icon">🗑️</span>
+                <span>Supprimer le message</span>
+            </div>
+        </div>
+
+        <!-- Modal d'édition -->
+        <div id="editModal" class="edit-modal">
+            <div class="edit-modal-content">
+                <h3>✏️ Modifier le message</h3>
+                <textarea id="editInput" class="edit-input" placeholder="Modifiez votre message..."></textarea>
+                <div class="edit-buttons">
+                    <button id="saveEdit" class="edit-btn save">💾 Sauvegarder</button>
+                    <button id="cancelEdit" class="edit-btn cancel">❌ Annuler</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
