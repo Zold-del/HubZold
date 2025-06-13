@@ -1,36 +1,32 @@
 // Configuration pour GamerChat
 
-// 🔧 CONFIGURATION GOOGLE OAUTH
-// Pour activer Google OAuth, suivez ces étapes :
+// � SYSTÈME D'AUTHENTIFICATION
+// Le site utilise maintenant un système d'authentification JWT complet
+// Plus besoin de Google OAuth - système de comptes intégré
 
-// 1. Allez sur https://console.cloud.google.com/
-// 2. Créez un projet ou sélectionnez un projet existant
-// 3. Dans le menu, allez à "APIs & Services" > "Credentials"
-// 4. Cliquez "Create Credentials" > "OAuth client ID"
-// 5. Choisissez "Web application"
-// 6. Ajoutez ces URI autorisées :
-//    - http://localhost:3000
-//    - http://127.0.0.1:3000
-// 7. Copiez votre Client ID
-
-const GOOGLE_CONFIG = {
-    // Remplacez par votre vrai Google Client ID
-    CLIENT_ID: "YOUR_GOOGLE_CLIENT_ID_HERE",
+const AUTH_CONFIG = {
+    // Mode développement désactivé - utilise l'authentification réelle
+    DEVELOPMENT_MODE: false,
     
-    // Pour activer Google OAuth, changez cette valeur à true
-    ENABLED: false
+    // JWT Configuration
+    JWT_SECRET: process.env.JWT_SECRET || "your-super-secret-jwt-key-change-in-production",
+    JWT_EXPIRY: "24h",
+    
+    // Validation des mots de passe
+    PASSWORD_MIN_LENGTH: 6,
+    REQUIRE_EMAIL_VERIFICATION: false // Pour simplifier les tests
 };
 
 // 🎮 CONFIGURATION DU CHAT
 const CHAT_CONFIG = {
-    // URL de l'API (ne pas changer sauf si vous déployez ailleurs)
-    API_URL: "http://localhost:3000/api",
+    // URL de l'API 
+    API_URL: process.env.NODE_ENV === 'production' ? "/api" : "http://localhost:3001/api",
     
     // Limite de caractères par message
     MESSAGE_LIMIT: 500,
     
     // Intervalle de rafraîchissement des messages (en millisecondes)
-    REFRESH_INTERVAL: 2000,
+    REFRESH_INTERVAL: 1000,
     
     // Durée de conservation des messages (en heures)
     MESSAGE_RETENTION: 24
@@ -52,5 +48,5 @@ const THEMES = {
 
 // Export pour utilisation dans d'autres fichiers
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { GOOGLE_CONFIG, CHAT_CONFIG, THEMES };
+    module.exports = { AUTH_CONFIG, CHAT_CONFIG, THEMES };
 }

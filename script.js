@@ -1,9 +1,9 @@
 // Configuration
-const API_BASE_URL = 'http://localhost:3001/api'; // Changé de 3000 à 3001
+const API_BASE_URL = 'http://localhost:3001/api'; // URL de l'API
 let currentUser = null;
 let selectedUserId = null;
 let messagesInterval = null;
-let isDevelopmentMode = true; // Mode développement activé par défaut
+let isDevelopmentMode = false; // Mode développement DÉSACTIVÉ - Authentification réelle activée
 
 // Variable pour suivre le message en cours d'édition
 let currentEditingMessage = null;
@@ -12,7 +12,7 @@ let currentEditingMessage = null;
 let friendRequests = [];
 let sentRequests = [];
 
-// Variables pour l'authentification
+// Variables pour l'authentification JWT
 let authToken = null;
 
 // Initialisation

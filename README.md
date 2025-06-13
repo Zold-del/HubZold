@@ -1,24 +1,42 @@
-# 🎮 GamerChat - Application de Chat Gaming
+# 🎮 GamerChat - Messagerie Gaming Authentifiée
 
-Une application de chat en temps réel conçue spécialement pour les gamers, avec un design moderne inspiré de Discord.
+Application de messagerie en temps réel avec système d'authentification complet, conçue pour les gamers avec une interface moderne style Discord.
 
 ## ✨ Fonctionnalités
 
-- 🔐 **Système d'authentification sécurisé** - Inscription/Connexion avec JWT
-- 💬 **Messagerie en temps réel** - Chat instantané entre utilisateurs
-- 👥 **Système d'amis** - Recherche et ajout d'amis
-- ✏️ **Édition de messages** - Modifier ses messages avec clic droit
-- 🎨 **Interface moderne** - Design Discord-like responsive
-- 🔒 **Sécurité** - Mots de passe hashés avec bcrypt
-- 📱 **Responsive** - Compatible mobile et desktop
+### 🔐 **Système d'authentification sécurisé**
+- **Inscription/Connexion** avec email et mot de passe
+- **Tokens JWT** pour la sécurité
+- **Hashage bcrypt** des mots de passe
+- **Sessions persistantes**
+
+### 💬 **Messagerie en temps réel**
+- **Chat instantané** entre utilisateurs connectés
+- **Modification et suppression** des messages (menu contextuel)
+- **Interface Discord-like** avec sidebar des joueurs
+- **Messages persistants** (24h de conservation)
+
+### 👥 **Système d'amis**
+- **Recherche d'amis** par pseudo
+- **Demandes d'amitié** avec acceptation/refus
+- **Notifications** en temps réel
+- **Liste des joueurs en ligne**
+
+### 🎨 **Interface moderne**
+- **Design Discord-like** plein écran
+- **Sidebar des joueurs** à gauche
+- **Profil utilisateur** en bas de sidebar
+- **Animations fluides** et effets gaming
+- **Responsive design** pour tous les écrans
 
 ## 🚀 Installation
 
 ### Prérequis
 - Node.js (version 14 ou supérieure)
-- npm ou yarn
+- npm
 
 ### Installation locale
+
 ```bash
 # Cloner le repository
 git clone https://github.com/Zold-del/HubZold.git
@@ -27,116 +45,143 @@ cd HubZold
 # Installer les dépendances
 npm install
 
+# Créer le fichier de configuration (optionnel)
+cp .env.example .env
+
 # Démarrer le serveur
 npm start
 ```
 
-L'application sera accessible sur `http://localhost:3001`
+### Ouvrir l'application
 
-## 📦 Dépendances
+```
+http://localhost:3001
+```
 
-- **express** - Serveur web
-- **uuid** - Génération d'identifiants uniques
-- **bcrypt** - Hashage des mots de passe
-- **jsonwebtoken** - Authentification JWT
+## 🔐 Authentification
+
+Le système utilise maintenant une **authentification JWT complète** :
+
+1. **Inscription** - Créez un compte avec email/mot de passe
+2. **Connexion** - Utilisez vos identifiants
+3. **Session automatique** - Restez connecté entre les sessions
+4. **Sécurité renforcée** - Mots de passe hashés, tokens sécurisés
+
+## 🎮 Utilisation
+
+### 1. Créer un compte
+- Cliquez sur l'onglet "Inscription"
+- Entrez email, nom d'utilisateur et mot de passe
+- Cliquez "S'inscrire"
+
+### 2. Se connecter
+- Utilisez l'onglet "Connexion"
+- Entrez vos identifiants
+- Accès automatique au chat
+
+### 3. Chatter
+- **Sélectionnez un utilisateur** dans la sidebar
+- **Tapez votre message** dans la zone de saisie
+- **Envoyez** avec Entrée ou le bouton
+
+### 4. Fonctions avancées
+- **Clic droit** sur vos messages → Modifier/Supprimer
+- **Recherche d'amis** → Entrez un pseudo et cliquez 🔎
+- **Gérer les demandes** → Accepter/Refuser les invitations
 
 ## 🛠️ Technologies utilisées
 
-- **Frontend**: HTML5, CSS3, JavaScript (Vanilla)
-- **Backend**: Node.js, Express.js
-- **Authentification**: JWT + bcrypt
-- **Style**: CSS moderne avec animations
+- **Frontend** : HTML5, CSS3, JavaScript (Vanilla)
+- **Backend** : Node.js, Express.js
+- **Authentification** : JWT (jsonwebtoken)
+- **Sécurité** : bcrypt pour le hashage des mots de passe
+- **API** : RESTful API
+- **Design** : CSS3 moderne avec animations
 
-## 📱 Fonctionnalités détaillées
-
-### Authentification
-- Inscription avec email/mot de passe
-- Connexion sécurisée avec tokens JWT
-- Session persistante
-- Validation côté client et serveur
-
-### Chat
-- Messages en temps réel
-- Affichage des utilisateurs en ligne
-- Interface style Discord
-- Modification de messages (clic droit)
-
-### Système d'amis
-- Recherche d'utilisateurs par pseudo
-- Demandes d'amitié avec acceptation/refus
-- Notifications en temps réel
-
-## 🎨 Design
-
-Interface moderne avec :
-- Couleurs gaming (vert/bleu néon)
-- Animations fluides
-- Layout responsive
-- Style Discord-like
-
-## 🔧 Configuration
-
-### Variables d'environnement
-```env
-PORT=3001
-JWT_SECRET=your-secret-key-here
-```
-
-### Sécurité
-- Mots de passe hashés avec bcrypt (saltRounds: 10)
-- Tokens JWT avec expiration 24h
-- Validation stricte des entrées utilisateur
-
-## 📄 Structure du projet
+## 📁 Structure du projet
 
 ```
-HubZold/
-├── index.html          # Page principale
-├── style.css           # Styles CSS
-├── script.js           # Logique client
-├── server.js           # Serveur Express
-├── package.json        # Configuration npm
-└── README.md          # Documentation
+TestSite/
+├── index.html          # Interface principale
+├── style.css          # Styles et animations
+├── script.js          # Logique client
+├── server.js          # Serveur Node.js et API
+├── config.js          # Configuration
+├── package.json       # Dépendances
+├── README.md          # Documentation
+├── .env.example       # Template de configuration
+├── .gitignore         # Fichiers à ignorer
+├── LICENSE            # Licence MIT
+└── Procfile          # Configuration Heroku
 ```
 
-## 🚀 Déploiement
+## 🌐 Déploiement
 
-### Heroku
+### Heroku (recommandé)
+
 ```bash
-# Créer une app Heroku
-heroku create your-app-name
-
-# Déployer
+# Installer Heroku CLI puis :
+heroku create votre-app-name
+heroku config:set JWT_SECRET=your-super-secret-key
 git push heroku main
 ```
 
-### Autres plateformes
-- **Vercel**: Déploiement automatique via GitHub
-- **Railway**: Simple déploiement Node.js
-- **DigitalOcean**: App Platform
+### Railway
+
+1. Connectez votre repository GitHub sur [railway.app](https://railway.app)
+2. Importez le projet
+3. Déploiement automatique
+
+### Vercel
+
+```bash
+npx vercel
+# Suivre les instructions
+```
+
+## 🔧 Configuration
+
+Créez un fichier `.env` basé sur `.env.example` :
+
+```env
+JWT_SECRET=your-super-secret-jwt-key-change-in-production
+PORT=3001
+NODE_ENV=production
+```
+
+## 🚀 Fonctionnalités à venir
+
+- 📊 Dashboard d'administration
+- 🎵 Partage de médias
+- 🎯 Salles de chat thématiques
+- 📝 Historique des messages étendu
+- 🌍 Support multilingue
+- 📱 Application mobile
 
 ## 🤝 Contribution
 
+Les contributions sont les bienvenues ! N'hésitez pas à :
+
 1. Fork le projet
-2. Créer une branche (`git checkout -b feature/AmazingFeature`)
-3. Commit les changements (`git commit -m 'Add AmazingFeature'`)
-4. Push sur la branche (`git push origin feature/AmazingFeature`)
+2. Créer une branche (`git checkout -b feature/nouvelle-fonctionnalite`)
+3. Commit vos changements (`git commit -m 'Ajout nouvelle fonctionnalité'`)
+4. Push vers la branche (`git push origin feature/nouvelle-fonctionnalite`)
 5. Ouvrir une Pull Request
 
 ## 📝 Licence
 
-Ce projet est sous licence MIT - voir le fichier [LICENSE](LICENSE) pour plus de détails.
+Ce projet est sous licence MIT. Voir le fichier [LICENSE](LICENSE) pour plus de détails.
 
 ## 👨‍💻 Auteur
 
-**Anthony** - *Développeur* - [Zold-del](https://github.com/Zold-del)
+**Zold** - [GitHub](https://github.com/Zold-del)
 
-## 🙏 Remerciements
+## 🔗 Liens utiles
 
-- Design inspiré de Discord
-- API Dicebear pour les avatars
-- Communauté gaming pour les retours
+- [Repository GitHub](https://github.com/Zold-del/HubZold)
+- [Issues](https://github.com/Zold-del/HubZold/issues)
+- [Releases](https://github.com/Zold-del/HubZold/releases)
 
 ---
 
-⭐ **N'hésitez pas à mettre une étoile si vous aimez le projet !**
+⭐ **N'oubliez pas de mettre une étoile si le projet vous plaît !**
