@@ -536,14 +536,13 @@ body {
 .context-menu {
     position: fixed;
     background: rgba(0, 0, 0, 0.95);
-    border: 2px solid #00ff88;
-    border-radius: 12px;
+    border: 2px solid #00ff88;    border-radius: 12px;
     padding: 8px 0;
     min-width: 180px;
     z-index: 1000;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-    backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
     display: none;
 }
 
@@ -622,14 +621,13 @@ body {
 }
 
 .edit-modal-content {
-    background: rgba(0, 0, 0, 0.95);
-    border: 2px solid #00ff88;
+    background: rgba(0, 0, 0, 0.95);    border: 2px solid #00ff88;
     border-radius: 20px;
     padding: 30px;
     max-width: 500px;
     width: 90%;
-    backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(20px);
 }
 
 .edit-modal h3 {
@@ -1120,8 +1118,8 @@ body {
 
 .auth-container {
     background: rgba(40, 43, 48, 0.95);
-    backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(20px);
     border-radius: 20px;
     padding: 40px;
     box-shadow: 
@@ -1390,5 +1388,4 @@ body {
 
 .hidden {
     display: none !important;
-}
 }
