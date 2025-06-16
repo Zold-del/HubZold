@@ -1,174 +1,443 @@
-// Configuration
-const API_BASE_URL = 'http://localhost:3001/api'; // URL de l'API
+// Configuration sécurisée
+const API_BASE_URL = window.location.hostname === 'localhost' 
+    ? 'http://localhost:3001/api' 
+    : '/api'; // Pour la production
+
 let currentUser = null;
 let selectedUserId = null;
-let messagesInterval = null;
-let isDevelopmentMode = false; // Mode développement DÉSACTIVÉ - Authentification réelle activée
-
-// Variable pour suivre le message en cours d'édition
-let currentEditingMessage = null;
-
-// Variables pour le système d'amis
-let friendRequests = [];
-let sentRequests = [];
-
-// Variables pour l'authentification JWT
 let authToken = null;
+let messagesInterval = null;
 
-// Initialisation
+// Variables WebSocket pour les appels en temps réel
+let websocket = null;
+let isWebSocketConnected = false;
+
+// Variables système d'appel WebRTC
+let currentCall = null;
+let localStream = null;
+let remoteStream = null;
+let peerConnection = null;
+let callTimer = null;
+let callStartTime = null;
+let isMuted = false;
+let isVideoEnabled = false;
+
+// Configuration WebRTC
+const rtcConfig = {
+    iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' }
+    ]
+};
+
+// Cache des messages pour optimiser les performances
+let messagesCache = new Map(); // conversationKey -> messages
+let lastMessagesHash = new Map(); // conversationKey -> hash
+
+// Initialisation sécurisée
 document.addEventListener('DOMContentLoaded', function() {
-    checkAuthStatus();
-    setupEventListeners();    if (isDevelopmentMode) {
-        setupDevelopmentMode();
-    }
+    console.log('=== INITIALISATION APPLICATION SÉCURISÉE ===');
     
+    // Sécurité : Nettoyer les données sensibles du localStorage au démarrage
+    cleanupStorageData();
+    
+    checkAuthStatus();
+    setupAuthInterface();
+    setupEventListeners();
     setupContextMenu();
     setupUserProfile();
     setupFriendsSystem();
-    setupAuth();
+    setupCallSystem();
+    
+    // Initialiser le WebSocket dès le chargement si utilisateur connecté
+    if (authToken && currentUser) {
+        connectWebSocket();
+    }
 });
 
-// Mode développement
-function setupDevelopmentMode() {
-    console.log('=== CONFIGURATION MODE DÉVELOPPEMENT ===');
-    
-    const devLoginBtn = document.getElementById('devLoginBtn');
-    const devUsername = document.getElementById('devUsername');
-    
-    console.log('Bouton trouvé:', devLoginBtn);
-    console.log('Input trouvé:', devUsername);
-    
-    if (devLoginBtn) {
-        devLoginBtn.addEventListener('click', (e) => {
-            e.preventDefault();
-            console.log('Clic sur le bouton de connexion');
-            devLogin();
-        });
-        console.log('Event listener ajouté au bouton');
-    } else {
-        console.error('Bouton devLoginBtn non trouvé !');
+// Nettoyage sécurisé des données de stockage
+function cleanupStorageData() {
+    try {
+        // Vérifier et nettoyer les données expirées
+        const tokenStr = localStorage.getItem('authToken');
+        if (tokenStr) {
+            try {
+                // Vérifier si le token n'est pas expiré (basique, côté client seulement)
+                const tokenPayload = JSON.parse(atob(tokenStr.split('.')[1]));
+                const now = Date.now() / 1000;
+                if (tokenPayload.exp && tokenPayload.exp < now) {
+                    console.log('🧹 Token expiré, nettoyage automatique');
+                    localStorage.removeItem('authToken');
+                    localStorage.removeItem('currentUser');
+                }
+            } catch (e) {
+                console.log('🧹 Token invalide, nettoyage automatique');
+                localStorage.removeItem('authToken');
+                localStorage.removeItem('currentUser');
+            }
+        }
+    } catch (error) {
+        console.error('❌ Erreur lors du nettoyage:', error);
     }
+}
+
+// Vérifie l'état d'authentification de manière sécurisée
+function checkAuthStatus() {
+    console.log('🔐 Vérification de l\'état d\'authentification');
     
-    if (devUsername) {
-        devUsername.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                console.log('Touche Entrée pressée');
-                devLogin();
+    authToken = localStorage.getItem('authToken');
+    const userStr = localStorage.getItem('currentUser');
+    
+    if (authToken && userStr) {
+        try {
+            currentUser = JSON.parse(userStr);
+            // Vérifier que l'utilisateur a bien les propriétés nécessaires
+            if (currentUser && currentUser.id && currentUser.username) {
+                console.log('✅ Utilisateur trouvé en local:', currentUser.username);
+                // Vérifier le token côté serveur
+                verifyTokenWithServer();
+            } else {
+                throw new Error('Données utilisateur incomplètes');
+            }
+        } catch (error) {
+            console.log('❌ Données utilisateur corrompues, nettoyage');
+            logout();
+        }
+    } else {
+        console.log('📝 Aucune session trouvée, affichage de la connexion');
+        showLoginScreen();
+    }
+}
+
+// Vérification du token côté serveur
+async function verifyTokenWithServer() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/auth/verify`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${authToken}`,
+                'Content-Type': 'application/json'
             }
         });
-        console.log('Event listener ajouté à l\'input');
-    } else {
-        console.error('Input devUsername non trouvé !');
+        
+        if (response.ok) {
+            const result = await response.json();
+            if (result.success) {
+                console.log('✅ Token valide, affichage du chat');
+                currentUser = result.user;
+                localStorage.setItem('currentUser', JSON.stringify(currentUser));
+                showChatScreen();
+                return;
+            }
+        }
+        
+        console.log('❌ Token invalide, déconnexion');
+        logout();
+        
+    } catch (error) {
+        console.error('❌ Erreur vérification token:', error);
+        logout();
     }
 }
 
-// Test simple pour vérifier que le bouton fonctionne
-function testButton() {
-    console.log('Test du bouton - CLIC DÉTECTÉ !');
-    alert('Le bouton fonctionne !');
+// Configuration de l'interface d'authentification
+function setupAuthInterface() {
+    console.log('=== CONFIGURATION INTERFACE AUTH ===');
+    
+    // Éléments de l'interface
+    const loginTab = document.getElementById('loginTab');
+    const registerTab = document.getElementById('registerTab');
+    const loginForm = document.getElementById('loginForm');
+    const registerForm = document.getElementById('registerForm');
+    const loginBtn = document.getElementById('loginBtn');
+    const registerBtn = document.getElementById('registerBtn');
+    
+    console.log('Éléments trouvés:', {
+        loginTab, registerTab, loginForm, registerForm, loginBtn, registerBtn
+    });
+    
+    // Gestion des onglets
+    if (loginTab && registerTab && loginForm && registerForm) {
+        loginTab.addEventListener('click', () => {
+            console.log('Onglet connexion cliqué');
+            switchToLoginTab();
+        });
+        
+        registerTab.addEventListener('click', () => {
+            console.log('Onglet inscription cliqué');
+            switchToRegisterTab();
+        });
+    }
+    
+    // Gestion des boutons de soumission
+    if (loginBtn) {
+        loginBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            console.log('Bouton connexion cliqué');
+            handleLogin();
+        });
+    }
+    
+    if (registerBtn) {
+        registerBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            console.log('Bouton inscription cliqué');
+            handleRegister();
+        });
+    }
+    
+    // Gestion des touches Entrée
+    const loginInputs = ['loginEmail', 'loginPassword'];
+    loginInputs.forEach(id => {
+        const input = document.getElementById(id);
+        if (input) {
+            input.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleLogin();
+                }
+            });
+        }
+    });
+    
+    const registerInputs = ['registerUsername', 'registerEmail', 'registerPassword'];
+    registerInputs.forEach(id => {
+        const input = document.getElementById(id);
+        if (input) {
+            input.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleRegister();
+                }
+            });
+        }
+    });
 }
 
-// Ajouter un event listener de test
-document.addEventListener('DOMContentLoaded', () => {
-    console.log('=== TEST DU BOUTON ===');
+// Basculer vers l'onglet connexion
+function switchToLoginTab() {
+    const loginTab = document.getElementById('loginTab');
+    const registerTab = document.getElementById('registerTab');
+    const loginForm = document.getElementById('loginForm');
+    const registerForm = document.getElementById('registerForm');
     
-    // Attendre un peu que la page soit complètement chargée
-    setTimeout(() => {
-        const btn = document.getElementById('devLoginBtn');
-        console.log('Bouton trouvé:', btn);
-        
-        if (btn) {
-            // Ajouter un event listener de test
-            btn.addEventListener('click', testButton);
-            console.log('Event listener de test ajouté');
-            
-            // Essayer aussi avec onclick direct
-            btn.onclick = function() {
-                console.log('Onclick direct déclenché');
-                devLogin();
-            };
-        } else {
-            console.error('ERREUR: Bouton devLoginBtn introuvable !');
-            // Lister tous les boutons disponibles
-            const allButtons = document.querySelectorAll('button');
-            console.log('Boutons trouvés:', allButtons);
-        }
-    }, 100);
-});
+    if (loginTab && registerTab && loginForm && registerForm) {
+        loginTab.classList.add('active');
+        registerTab.classList.remove('active');
+        loginForm.classList.add('active');
+        registerForm.classList.remove('active');
+    }
+}
 
-function devLogin() {
+// Basculer vers l'onglet inscription
+function switchToRegisterTab() {
+    const loginTab = document.getElementById('loginTab');
+    const registerTab = document.getElementById('registerTab');
+    const loginForm = document.getElementById('loginForm');
+    const registerForm = document.getElementById('registerForm');
+    
+    if (loginTab && registerTab && loginForm && registerForm) {
+        registerTab.classList.add('active');
+        loginTab.classList.remove('active');
+        registerForm.classList.add('active');
+        loginForm.classList.remove('active');
+    }
+}
+
+// Gérer la connexion
+async function handleLogin() {
     console.log('=== DÉBUT CONNEXION ===');
     
-    const username = document.getElementById('devUsername').value.trim();
-    console.log('Nom d\'utilisateur saisi:', username);
+    const email = document.getElementById('loginEmail')?.value.trim();
+    const password = document.getElementById('loginPassword')?.value;
+    const messageDiv = document.getElementById('authMessage');
     
-    if (!username) {
-        alert('Veuillez entrer un nom de joueur');
+    if (!email || !password) {
+        showAuthMessage('Veuillez remplir tous les champs', 'error');
         return;
     }
     
-    // Créer un ID unique basé sur le nom d'utilisateur
-    const userId = 'dev_' + username.toLowerCase().replace(/[^a-z0-9]/g, '_');
-    
-    // Créer un utilisateur temporaire
-    currentUser = {
-        id: userId,
-        name: username,
-        email: username + '@dev.local',
-        picture: `https://api.dicebear.com/7.x/avataaars/svg?seed=${username}`
-    };
-    
-    console.log('Utilisateur créé:', currentUser);
+    const loginBtn = document.getElementById('loginBtn');
+    if (loginBtn) {
+        loginBtn.disabled = true;
+        loginBtn.textContent = '🔄 Connexion...';
+    }
     
     try {
-        // Enregistrer l'utilisateur sur le serveur
-        registerUser(currentUser);
+        const response = await fetch(`${API_BASE_URL}/auth/login`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ email, password })
+        });
         
-        // Afficher l'interface de chat
-        showChatScreen();
+        const result = await response.json();
+        console.log('Résultat connexion:', result);
         
-    // Mettre à jour le profil utilisateur
-    updateCurrentUserProfile();
-    
-    // Charger les demandes d'amitié
-    loadFriendRequests();
-    
-    // Démarrer le pollingimmédiatement
-        startMessagesPolling();
-        
-        console.log('=== CONNEXION RÉUSSIE ===');
+        if (result.success) {
+            authToken = result.token;
+            currentUser = result.user;
+            localStorage.setItem('authToken', authToken);
+            localStorage.setItem('currentUser', JSON.stringify(currentUser));
+            
+            showAuthMessage('Connexion réussie !', 'success');
+            setTimeout(() => {
+                showChatScreen();
+            }, 1000);
+        } else {
+            showAuthMessage(result.message || 'Erreur de connexion', 'error');
+        }
     } catch (error) {
-        console.error('Erreur lors de la connexion:', error);
-        alert('Erreur lors de la connexion. Vérifiez la console.');
+        console.error('Erreur connexion:', error);
+        showAuthMessage('Erreur de connexion au serveur', 'error');
+    } finally {
+        if (loginBtn) {
+            loginBtn.disabled = false;
+            loginBtn.textContent = '🚀 Se connecter';
+        }
     }
 }
 
-// Gestion de l'authentification Google
-function handleCredentialResponse(response) {
-    const responsePayload = decodeJwtResponse(response.credential);
+// Gérer l'inscription
+async function handleRegister() {
+    console.log('=== DÉBUT INSCRIPTION ===');
     
-    currentUser = {
-        id: responsePayload.sub,
-        name: responsePayload.name,
-        email: responsePayload.email,
-        picture: responsePayload.picture
-    };
+    const username = document.getElementById('registerUsername')?.value.trim();
+    const email = document.getElementById('registerEmail')?.value.trim();
+    const password = document.getElementById('registerPassword')?.value;
     
-    // Enregistrer l'utilisateur sur le serveur
-    registerUser(currentUser);
+    if (!username || !email || !password) {
+        showAuthMessage('Veuillez remplir tous les champs', 'error');
+        return;
+    }
     
-    // Afficher l'interface de chat
-    showChatScreen();
+    if (password.length < 6) {
+        showAuthMessage('Le mot de passe doit contenir au moins 6 caractères', 'error');
+        return;
+    }
+    
+    const registerBtn = document.getElementById('registerBtn');
+    if (registerBtn) {
+        registerBtn.disabled = true;
+        registerBtn.textContent = '🔄 Inscription...';
+    }
+    
+    try {
+        const response = await fetch(`${API_BASE_URL}/auth/register`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ username, email, password })
+        });
+        
+        const result = await response.json();
+        console.log('Résultat inscription:', result);
+        
+        if (result.success) {
+            authToken = result.token;
+            currentUser = result.user;
+            localStorage.setItem('authToken', authToken);
+            localStorage.setItem('currentUser', JSON.stringify(currentUser));
+            
+            showAuthMessage('Compte créé avec succès !', 'success');
+            setTimeout(() => {
+                showChatScreen();
+            }, 1000);
+        } else {
+            showAuthMessage(result.message || 'Erreur lors de l\'inscription', 'error');
+        }
+    } catch (error) {
+        console.error('Erreur inscription:', error);
+        showAuthMessage('Erreur de connexion au serveur', 'error');
+    } finally {
+        if (registerBtn) {
+            registerBtn.disabled = false;
+            registerBtn.textContent = '✨ S\'inscrire';
+        }
+    }
 }
 
-function decodeJwtResponse(token) {
-    const base64Url = token.split('.')[1];
-    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-    const jsonPayload = decodeURIComponent(atob(base64).split('').map(function(c) {
-        return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
-    }).join(''));
-    return JSON.parse(jsonPayload);
+// Système de notifications
+function showNotification(message, type = 'info') {
+    console.log(`📢 Notification [${type}]: ${message}`);
+    
+    // Créer l'élément de notification
+    const notification = document.createElement('div');
+    notification.className = `notification notification-${type}`;
+    notification.textContent = message;
+    
+    // Styles inline pour la notification
+    Object.assign(notification.style, {
+        position: 'fixed',
+        top: '20px',
+        right: '20px',
+        padding: '12px 20px',
+        borderRadius: '8px',
+        color: 'white',
+        fontWeight: '500',
+        zIndex: '10000',
+        minWidth: '200px',
+        maxWidth: '400px',
+        boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+        transform: 'translateX(100%)',
+        transition: 'transform 0.3s ease, opacity 0.3s ease',
+        opacity: '0'
+    });
+    
+    // Couleurs selon le type
+    switch (type) {
+        case 'success':
+            notification.style.background = 'linear-gradient(135deg, #00ff88, #00dd77)';
+            break;
+        case 'error':
+            notification.style.background = 'linear-gradient(135deg, #ff4757, #ff3742)';
+            break;
+        case 'info':
+            notification.style.background = 'linear-gradient(135deg, #3742fa, #2f3542)';
+            break;
+        default:
+            notification.style.background = 'linear-gradient(135deg, #747d8c, #57606f)';
+    }
+    
+    // Ajouter au DOM
+    document.body.appendChild(notification);
+    
+    // Animation d'entrée
+    setTimeout(() => {
+        notification.style.transform = 'translateX(0)';
+        notification.style.opacity = '1';
+    }, 100);
+    
+    // Suppression automatique après 4 secondes
+    setTimeout(() => {
+        notification.style.transform = 'translateX(100%)';
+        notification.style.opacity = '0';
+        setTimeout(() => {
+            if (notification.parentNode) {
+                notification.parentNode.removeChild(notification);
+            }
+        }, 300);
+    }, 4000);
+}
+
+// Fonction pour afficher les messages d'authentification
+function showAuthMessage(message, type = 'info') {
+    const messageDiv = document.getElementById('authMessage');
+    if (messageDiv) {
+        messageDiv.textContent = message;
+        messageDiv.className = `auth-message ${type}`;
+        messageDiv.style.display = 'block';
+        
+        // Masquer après 5 secondes
+        setTimeout(() => {
+            messageDiv.style.display = 'none';
+        }, 5000);
+    } else {
+        // Fallback vers showNotification si l'élément n'existe pas
+        showNotification(message, type);
+    }
 }
 
 // Gestion des écrans
@@ -182,44 +451,77 @@ function showChatScreen() {
     console.log('Chat screen élément:', chatScreen);
     
     // Vérifier que les éléments existent
-    if (!loginScreen) {
-        console.error('ERREUR: loginScreen introuvable !');
+    if (!loginScreen || !chatScreen) {
+        console.error('ERREUR: Éléments manquants!');
         return;
     }
     
-    if (!chatScreen) {
-        console.error('ERREUR: chatScreen introuvable !');
-        return;
-    }
+    // Méthode 1: Classes CSS
+    loginScreen.className = 'screen';
+    chatScreen.className = 'screen active';
     
-    // Cacher l'écran de connexion
-    loginScreen.classList.add('hidden');
+    // Méthode 2: Styles directs (backup)
     loginScreen.style.display = 'none';
-    console.log('Login screen caché');
-    
-    // Afficher l'écran de chat
-    chatScreen.classList.remove('hidden');
     chatScreen.style.display = 'flex';
-    console.log('Chat screen affiché');
     
-    // Vérifier que le chat container existe
-    const chatContainer = document.querySelector('.chat-container');
-    console.log('Chat container:', chatContainer);
+    console.log('Classes et styles appliqués');
+    console.log('Login screen classes:', loginScreen.className);
+    console.log('Chat screen classes:', chatScreen.className);
     
-    if (chatContainer) {
-        chatContainer.style.display = 'flex';
-        console.log('Chat container affiché');
+    // Initialiser l'interface de chat
+    try {        // Mettre à jour le profil utilisateur dans la sidebar
+        if (typeof updateCurrentUserProfile === 'function') {
+            updateCurrentUserProfile();
+        }
+          // Charger les amis
+        if (typeof loadFriends === 'function') {
+            loadFriends();
+        }        // Charger les demandes d'amitié
+        if (typeof loadFriendRequests === 'function') {
+            loadFriendRequests();
+        }
+        
+        // Forcer l'affichage de la section demandes d'amis (même vide)
+        initializeFriendRequestsSection();
+        
+        // Démarrer le polling des messages
+        if (typeof startMessagesPolling === 'function') {
+            startMessagesPolling();
+        }
+          // Charger les utilisateurs
+        if (typeof loadUsers === 'function') {
+            loadUsers();
+        }
+        
+        // Reconfigurer le système d'amis pour l'utilisateur connecté
+        setupFriendsSystem();
+          // Reconfigurer les event listeners pour le chat
+        setupChatEventListeners();
+          // Configurer le système d'appel
+        setupCallSystem();
+        
+        // Connecter WebSocket pour les appels en temps réel
+        connectWebSocket();
+        
+        console.log('=== ÉCRAN DE CHAT AFFICHÉ ET INITIALISÉ ===');
+    } catch (error) {
+        console.error('Erreur lors de l\'initialisation du chat:', error);
     }
-    
-    // Charger les utilisateurs
-    loadUsers();
-    
-    console.log('=== ÉCRAN DE CHAT AFFICHÉ ===');
 }
 
 function showLoginScreen() {
-    document.getElementById('chatScreen').classList.remove('active');
-    document.getElementById('loginScreen').classList.add('active');
+    console.log('=== AFFICHAGE ÉCRAN LOGIN ===');
+    
+    const loginScreen = document.getElementById('loginScreen');
+    const chatScreen = document.getElementById('chatScreen');
+    
+    if (loginScreen && chatScreen) {
+        chatScreen.classList.remove('active');
+        chatScreen.classList.add('hidden');
+        loginScreen.classList.add('active');
+        loginScreen.classList.remove('hidden');
+        console.log('Écran de login affiché');
+    }
     
     if (messagesInterval) {
         clearInterval(messagesInterval);
@@ -228,74 +530,248 @@ function showLoginScreen() {
 
 // Configuration des événements
 function setupEventListeners() {
-    document.getElementById('logoutBtn').addEventListener('click', logout);
-    document.getElementById('sendBtn').addEventListener('click', sendMessage);
-    document.getElementById('messageInput').addEventListener('keypress', function(e) {
-        if (e.key === 'Enter') {
+    console.log('=== CONFIGURATION EVENT LISTENERS ===');
+      // Bouton de déconnexion
+    const logoutBtn = document.getElementById('logoutBtn') || document.getElementById('profileLogoutBtn');
+    if (logoutBtn) {
+        logoutBtn.addEventListener('click', logout);
+        console.log('✅ Event listener logout configuré');
+    } else {
+        console.log('⚠️ Bouton logout non trouvé');
+    }
+    
+    // Bouton d'envoi de message
+    const sendBtn = document.getElementById('sendBtn');
+    if (sendBtn) {
+        sendBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            console.log('🎯 Bouton envoi cliqué');
             sendMessage();
-        }
-    });
+        });
+        console.log('✅ Event listener sendBtn configuré');
+    } else {
+        console.log('⚠️ Bouton sendBtn non trouvé');
+    }
+    
+    // Champ de saisie de message
+    const messageInput = document.getElementById('messageInput');
+    if (messageInput) {
+        messageInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                console.log('🎯 Touche Entrée pressée');
+                sendMessage();
+            }
+        });
+        console.log('✅ Event listener messageInput configuré');    } else {
+        console.log('⚠️ Champ messageInput non trouvé');
+    }
+    
+    // Initialiser le menu contextuel des profils
+    if (typeof initProfileContextMenu === 'function') {
+        initProfileContextMenu();
+        console.log('✅ Menu contextuel des profils initialisé');
+    }
 }
 
-// Gestion des utilisateurs
-async function registerUser(user) {
+// Fonction pour reconfigurer les event listeners après affichage du chat
+function setupChatEventListeners() {
+    console.log('=== CONFIGURATION EVENT LISTENERS CHAT ===');
+    
+    // Reconfigurer seulement les éléments du chat
+    const sendBtn = document.getElementById('sendBtn');
+    const messageInput = document.getElementById('messageInput');
+    
+    if (sendBtn) {
+        // Supprimer les anciens listeners en clonant l'élément
+        const newSendBtn = sendBtn.cloneNode(true);
+        sendBtn.parentNode.replaceChild(newSendBtn, sendBtn);
+        
+        newSendBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            console.log('🎯 Bouton envoi cliqué (reconfiguré)');
+            sendMessage();
+        });
+        console.log('✅ Event listener sendBtn reconfiguré');
+    }
+    
+    if (messageInput) {
+        // Supprimer les anciens listeners en clonant l'élément
+        const newMessageInput = messageInput.cloneNode(true);
+        messageInput.parentNode.replaceChild(newMessageInput, messageInput);
+        
+        newMessageInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                console.log('🎯 Touche Entrée pressée (reconfiguré)');
+                sendMessage();
+            }
+        });
+        console.log('✅ Event listener messageInput reconfiguré');
+    }
+}
+
+// Fonction pour envoyer un message (corrigée et sécurisée)
+async function sendMessage() {
+    console.log('=== ENVOI MESSAGE SÉCURISÉ ===');
+    
+    const messageInput = document.getElementById('messageInput');
+    if (!messageInput || !selectedUserId || !authToken) {
+        console.error('❌ Impossible d\'envoyer le message: données manquantes');
+        return;
+    }
+    
+    const content = messageInput.value.trim();
+    if (!content) {
+        console.log('❌ Message vide');
+        return;
+    }
+    
+    console.log('📤 Envoi du message:', content.substring(0, 50) + '...');
+    
+    // Désactiver temporairement le bouton d'envoi
+    const sendBtn = document.getElementById('sendBtn');
+    if (sendBtn) {
+        sendBtn.disabled = true;
+    }
+    
     try {
-        const response = await fetch(`${API_BASE_URL}/users/register`, {
+        const response = await fetch(`${API_BASE_URL}/messages`, {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authToken}`,
+                'Content-Type': 'application/json'
             },
-            body: JSON.stringify(user)
+            body: JSON.stringify({
+                receiverId: selectedUserId,
+                content: content
+            })
         });
+        
+        if (!response.ok) {
+            if (response.status === 401 || response.status === 403) {
+                logout();
+                return;
+            }
+            throw new Error(`Erreur HTTP: ${response.status}`);
+        }
         
         const result = await response.json();
         
-        // Mettre à jour l'ID utilisateur si le serveur en retourne un différent
-        if (result.userId && result.userId !== user.id) {
-            currentUser.id = result.userId;
+        if (result.success) {
+            console.log('✅ Message envoyé avec succès');
+            
+            // Vider le champ de saisie
+            messageInput.value = '';
+            
+            // Mettre à jour la conversation localement
+            const conversationKey = getConversationKey(currentUser.id, selectedUserId);
+            const cachedMessages = messagesCache.get(conversationKey) || [];
+            cachedMessages.push(result.message);
+            messagesCache.set(conversationKey, cachedMessages);
+            
+            // Rafraîchir l'affichage
+            displayMessages(cachedMessages, conversationKey);
+            
+        } else {
+            throw new Error(result.error || 'Erreur lors de l\'envoi');
         }
         
-        return result;
     } catch (error) {
-        console.error('Erreur lors de l\'enregistrement:', error);
+        console.error('❌ Erreur envoi message:', error);
+        showNotification(`❌ ${error.message}`, 'error');
+    } finally {
+        // Réactiver le bouton d'envoi
+        if (sendBtn) {
+            sendBtn.disabled = false;
+        }
     }
 }
 
+// Gestion des utilisateurs
 async function loadUsers() {
+    console.log('=== CHARGEMENT AMIS ===');
+    console.log('Auth token:', authToken ? 'Présent' : 'Manquant');
+    console.log('Current user:', currentUser);
+    
+    if (!authToken) {
+        console.error('Pas de token d\'authentification');
+        const usersList = document.getElementById('usersList');
+        usersList.innerHTML = '<div class="no-users-message">Non connecté</div>';
+        return;
+    }
+    
     try {
-        const response = await fetch(`${API_BASE_URL}/users`);
-        const users = await response.json();
+        const response = await fetch(`${API_BASE_URL}/friends`, {
+            headers: {
+                'Authorization': `Bearer ${authToken}`
+            }
+        });
+        
+        console.log('Response status:', response.status);
+        
+        if (response.status === 401 || response.status === 403) {
+            console.error('Token invalide, déconnexion nécessaire');
+            logout();
+            return;
+        }
+        
+        if (!response.ok) {
+            console.error('Erreur lors du chargement des amis:', response.status);
+            const usersList = document.getElementById('usersList');
+            usersList.innerHTML = '<div class="no-users-message">Erreur de connexion au serveur</div>';
+            return;
+        }
+        
+        const result = await response.json();
+        console.log('Résultat serveur:', result);
+        
+        const friends = result.friends || [];
         
         const usersList = document.getElementById('usersList');
         usersList.innerHTML = '';
-          users.forEach(user => {
-            if (user.id !== currentUser.id) {
-                const userElement = createUserElement(user);
+        
+        if (Array.isArray(friends) && friends.length > 0) {
+            friends.forEach(friend => {
+                const userElement = createUserElement(friend);
                 usersList.appendChild(userElement);
-            }
-        });
-          // Afficher un message si aucun utilisateur n'est en ligne
-        if (users.filter(u => u.id !== currentUser.id).length === 0) {
-            usersList.innerHTML = '<div class="no-users-message">Aucun autre joueur en ligne</div>';
+            });
+            
+            console.log(`${friends.length} ami(s) chargé(s)`);
+        } else {
+            usersList.innerHTML = '<div class="no-users-message">Aucun ami ajouté<br><small>Utilisez la recherche pour ajouter des amis !</small></div>';
         }
+        
     } catch (error) {
-        console.error('Erreur lors du chargement des utilisateurs:', error);
-    }
+        console.error('Erreur lors du chargement des amis:', error);
+        const usersList = document.getElementById('usersList');
+        usersList.innerHTML = '<div class="no-users-message">Erreur de connexion</div>';    }
 }
 
 function createUserElement(user) {
     const div = document.createElement('div');
     div.className = 'user-item';
     div.dataset.userId = user.id;
-    div.innerHTML = `
-        <img src="${user.picture}" alt="${user.name}" class="user-avatar">
+    
+    // Support des deux formats : nouveau (username/avatar) et ancien (name/picture)
+    const userName = user.username || user.name || 'Utilisateur';
+    const userAvatar = user.avatar || user.picture || '/img/default-avatar.png';
+      div.innerHTML = `
+        <img src="${userAvatar}" alt="${userName}" class="user-avatar">
         <div class="user-info">
-            <div class="user-name">${user.name}</div>
+            <div class="user-name">${userName}</div>
             <div class="user-status">En ligne</div>
         </div>
     `;
     
     div.addEventListener('click', () => selectUser(user.id, div, user));
+    
+    // Ajouter le menu contextuel
+    div.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        showProfileContextMenu(e, user);
+    });
+    
     return div;
 }
 
@@ -322,13 +798,183 @@ function selectUser(userId, element, userInfo) {
     if (noChatElement) {
         noChatElement.classList.add('hidden');
     }
+      // Mettre à jour les infos de l'utilisateur sélectionné
+    const selectedUserName = userInfo.username || userInfo.name || 'Utilisateur';
+    const selectedUserAvatar = userInfo.avatar || userInfo.picture || '/img/default-avatar.png';
     
-    // Mettre à jour les infos de l'utilisateur sélectionné
-    document.getElementById('selectedUserName').textContent = userInfo.name;
-    document.getElementById('selectedUserAvatar').src = userInfo.picture;
+    document.getElementById('selectedUserName').textContent = selectedUserName;
+    document.getElementById('selectedUserAvatar').src = selectedUserAvatar;
     
     // Charger les messages
     loadMessages();
+}
+
+// Fonction pour charger les messages d'une conversation (améliorée)
+async function loadMessages(userId = selectedUserId) {
+    if (!userId || !authToken) {
+        console.log('❌ Impossible de charger les messages: userId ou token manquant');
+        return;
+    }
+    
+    console.log('=== CHARGEMENT MESSAGES OPTIMISÉ ===');
+    console.log('User ID:', userId);
+    console.log('Current User:', currentUser?.username);
+    
+    const conversationKey = getConversationKey(currentUser.id, userId);
+    
+    try {
+        const response = await fetch(`${API_BASE_URL}/messages/${userId}`, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${authToken}`,
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (!response.ok) {
+            console.error('❌ Erreur HTTP lors du chargement des messages:', response.status);
+            if (response.status === 401 || response.status === 403) {
+                logout();
+            }
+            return;
+        }
+        
+        const result = await response.json();
+        console.log('✅ Messages reçus:', result.messages?.length || 0, 'messages');
+        
+        if (result.success && result.messages) {
+            // Mettre à jour le cache
+            messagesCache.set(conversationKey, result.messages);
+            displayMessages(result.messages, conversationKey);
+        } else {
+            console.log('❌ Échec du chargement des messages:', result.error);
+        }
+        
+    } catch (error) {
+        console.error('❌ Erreur lors du chargement des messages:', error);
+        showNotification('❌ Erreur lors du chargement des messages', 'error');
+    }
+}
+
+// Fonction pour obtenir la clé de conversation
+function getConversationKey(userId1, userId2) {
+    return [userId1, userId2].sort().join('-');
+}
+
+// Fonction pour afficher les messages (corrigée et optimisée)
+function displayMessages(messages, conversationKey) {
+    const messagesContainer = document.getElementById('messagesContainer');
+    if (!messagesContainer) {
+        console.error('❌ Container de messages introuvable');
+        return;
+    }
+    
+    // Vérifier si les messages ont changé pour éviter les re-rendus inutiles
+    const messagesHash = JSON.stringify(messages.map(m => ({ id: m.id, content: m.content, timestamp: m.timestamp })));
+    const lastHash = lastMessagesHash.get(conversationKey);
+    
+    if (messagesHash === lastHash) {
+        console.log('📋 Messages identiques, pas de re-rendu');
+        return;
+    }
+    
+    lastMessagesHash.set(conversationKey, messagesHash);
+    
+    console.log('🎨 Affichage de', messages.length, 'messages');
+    
+    // Sauvegarder la position de scroll avant le re-rendu
+    const wasAtBottom = messagesContainer.scrollHeight - messagesContainer.scrollTop <= messagesContainer.clientHeight + 1;
+    
+    // Nettoyer le container
+    messagesContainer.innerHTML = '';
+    
+    if (messages.length === 0) {
+        messagesContainer.innerHTML = `
+            <div class="no-messages">
+                <div class="no-messages-icon">💬</div>
+                <p>Aucun message dans cette conversation</p>
+                <p class="no-messages-help">Envoyez le premier message pour commencer !</p>
+            </div>
+        `;
+        return;
+    }
+    
+    // Créer les éléments de message
+    messages.forEach((message, index) => {
+        const messageElement = createMessageElement(message, index);
+        messagesContainer.appendChild(messageElement);
+    });
+    
+    // Gerer le scroll : aller en bas si on était déjà en bas, ou maintenir la position
+    if (wasAtBottom) {
+        scrollToBottom(messagesContainer);
+    }
+    
+    console.log('✅ Messages affichés avec succès');
+}
+
+// Créer un élément de message (fonction séparée pour la lisibilité)
+function createMessageElement(message, index) {
+    const messageElement = document.createElement('div');
+    messageElement.className = 'message';
+    messageElement.setAttribute('data-message-id', message.id);
+    
+    const isOwnMessage = currentUser && message.senderId === currentUser.id;
+    messageElement.classList.add(isOwnMessage ? 'own-message' : 'other-message');
+    
+    // Formatage de l'heure
+    const messageDate = new Date(message.timestamp);
+    const now = new Date();
+    const isToday = messageDate.toDateString() === now.toDateString();
+    
+    let timeFormat;
+    if (isToday) {
+        timeFormat = messageDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } else {
+        timeFormat = messageDate.toLocaleDateString() + ' ' + messageDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+    
+    // Échapper le HTML pour éviter les injections XSS
+    const safeContent = escapeHtml(message.content);
+    const safeTimestamp = escapeHtml(timeFormat);
+    
+    messageElement.innerHTML = `
+        <div class="message-content">
+            <div class="message-text">${safeContent}</div>
+            <div class="message-timestamp">${safeTimestamp}</div>
+            ${message.edited ? '<div class="message-edited">✏️ modifié</div>' : ''}
+
+        `;
+    
+    return messageElement;
+}
+
+// Fonction d'échappement HTML sécurisée
+function escapeHtml(unsafe) {
+    if (typeof unsafe !== 'string') return '';
+    return unsafe
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
+// Fonction pour scroller en bas avec animation fluide
+function scrollToBottom(container) {
+    if (!container) return;
+    
+    container.scrollTo({
+        top: container.scrollHeight,
+        behavior: 'smooth'
+    });
+}
+
+// Fonction utilitaire pour échapper le HTML
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }
 
 // Mettre à jour le profil utilisateur en bas de la sidebar
@@ -338,7 +984,10 @@ function updateCurrentUserProfile() {
         return;
     }
     
-    console.log('Mise à jour du profil utilisateur:', currentUser.name);
+    const userName = currentUser.username || currentUser.name || 'Utilisateur';
+    const userAvatar = currentUser.avatar || currentUser.picture || '/img/default-avatar.png';
+    
+    console.log('Mise à jour du profil utilisateur:', userName);
     
     const profileSection = document.getElementById('userProfileSection');
     const currentUserAvatar = document.getElementById('currentUserAvatar');
@@ -348,13 +997,13 @@ function updateCurrentUserProfile() {
     console.log('Avatar élément:', currentUserAvatar);
     console.log('Name élément:', currentUserName);
     
-    if (currentUserAvatar && currentUser.picture) {
-        currentUserAvatar.src = currentUser.picture;
+    if (currentUserAvatar) {
+        currentUserAvatar.src = userAvatar;
         console.log('Avatar mis à jour');
     }
     
-    if (currentUserName && currentUser.name) {
-        currentUserName.textContent = currentUser.name;
+    if (currentUserName) {
+        currentUserName.textContent = userName;
         console.log('Nom mis à jour');
     }
     
@@ -364,131 +1013,230 @@ function updateCurrentUserProfile() {
     }
 }
 
+// Fonction pour éditer un message
+async function editMessage(messageId, currentContent) {
+    const newContent = prompt('Modifier le message:', currentContent);
+    if (!newContent || newContent.trim() === '') return;
+    
+    try {
+        const response = await fetch(`${API_BASE_URL}/messages/${messageId}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authToken}`
+            },
+            body: JSON.stringify({ content: newContent.trim() })
+        });
+        
+        const result = await response.json();
+        if (result.success) {
+            showNotification('✅ Message modifié', 'success');
+            loadMessages(selectedUserId);
+        } else {
+            showNotification('❌ Erreur modification', 'error');
+        }
+    } catch (error) {
+        console.error('Erreur édition message:', error);
+        showNotification('❌ Erreur connexion', 'error');
+    }
+}
+
+// Fonction pour supprimer un message
+async function deleteMessage(messageId) {
+    if (!confirm('Supprimer ce message ?')) return;
+    
+    try {
+        const response = await fetch(`${API_BASE_URL}/messages/${messageId}`, {
+            method: 'DELETE',
+            headers: {
+                'Authorization': `Bearer ${authToken}`
+            }
+        });
+        
+        const result = await response.json();
+        if (result.success) {
+            showNotification('✅ Message supprimé', 'success');
+            loadMessages(selectedUserId);
+        } else {
+            showNotification('❌ Erreur suppression', 'error');
+        }
+    } catch (error) {
+        console.error('Erreur suppression message:', error);
+        showNotification('❌ Erreur connexion', 'error');
+    }
+}
+
 // Système de recherche d'amis
 function setupFriendsSystem() {
+    console.log('=== SETUP FRIENDS SYSTEM ===');
+    
     const searchInput = document.getElementById('friendSearchInput');
     const searchBtn = document.getElementById('searchFriendBtn');
     
+    console.log('Éléments trouvés:');
+    console.log('- searchInput:', searchInput);
+    console.log('- searchBtn:', searchBtn);
+    
     if (searchBtn) {
         searchBtn.addEventListener('click', searchForFriend);
+        console.log('✅ Event listener ajouté au bouton de recherche');
+    } else {
+        console.log('❌ Bouton de recherche non trouvé');
     }
     
     if (searchInput) {
         searchInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
+                console.log('🎯 Touche Entrée pressée dans la recherche');
                 searchForFriend();
             }
         });
+        console.log('✅ Event listener ajouté au champ de recherche');
+    } else {
+        console.log('❌ Champ de recherche non trouvé');
     }
 }
 
 function searchForFriend() {
+    console.log('=== RECHERCHE D\'AMI SÉCURISÉE ===');
+    
     const searchInput = document.getElementById('friendSearchInput');
-    const friendName = searchInput.value.trim();
+    const friendName = searchInput ? searchInput.value.trim() : '';
     
-    console.log('=== TEST API D\'ABORD ===');
+    if (!friendName) {
+        showNotification('❌ Veuillez entrer un nom d\'utilisateur', 'error');
+        return;
+    }
     
-    // Test simple de l'API d'abord
-    fetch(`${API_BASE_URL}/test`)
-        .then(response => {
-            console.log('Test API response status:', response.status);
-            return response.json();
-        })
-        .then(result => {
-            console.log('Test API result:', result);
-            
-            // Si l'API fonctionne, procéder à la recherche d'ami
-            if (result.success) {
-                proceedWithFriendSearch(friendName);
-            }
-        })
-        .catch(error => {
-            console.error('Test API failed:', error);
-            showNotification('❌ Serveur non accessible', 'error');
-        });
+    if (!currentUser || !authToken) {
+        showNotification('❌ Vous devez être connecté', 'error');
+        return;
+    }
+    
+    // Validation du nom d'utilisateur côté client
+    if (!/^[a-zA-Z0-9_-]{3,20}$/.test(friendName)) {
+        showNotification('❌ Nom d\'utilisateur invalide (3-20 caractères, lettres, chiffres, _ et - uniquement)', 'error');
+        return;
+    }
+    
+    if (friendName.toLowerCase() === currentUser.username.toLowerCase()) {
+        showNotification('❌ Vous ne pouvez pas vous ajouter vous-même !', 'error');
+        return;
+    }
+    
+    console.log('✅ Envoi demande d\'ami pour:', friendName);
+    sendFriendRequest(friendName);
 }
 
-function proceedWithFriendSearch(friendName) {
-    if (!friendName) {
-        alert('Veuillez entrer un nom d\'ami à rechercher');
-        return;
-    }
+async function searchUserByUsername(username) {
+    console.log('=== VÉRIFICATION EXISTENCE UTILISATEUR ===');
+    console.log('Recherche de:', username);
     
-    if (!currentUser) {
-        alert('Vous devez être connecté pour rechercher des amis');
-        return;
+    try {
+        const response = await fetch(`${API_BASE_URL}/users/search/${encodeURIComponent(username)}`, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${authToken}`,
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        console.log('Response status:', response.status);
+        
+        if (!response.ok) {
+            console.error('Erreur HTTP:', response.status);
+            showNotification(`❌ Erreur serveur: ${response.status}`, 'error');
+            return;
+        }
+        
+        const result = await response.json();
+        console.log('Résultat recherche:', result);
+          if (result.success) {
+            // Utilisateur trouvé, procéder à l'ajout d'ami
+            console.log('✅ Utilisateur trouvé:', result.user);
+            showNotification(`✅ Utilisateur "${result.user.username}" trouvé !`, 'success');
+            
+            // Attendre un peu puis envoyer la demande d'amitié
+            setTimeout(() => {
+                sendFriendRequest(result.user.username);
+            }, 1000);
+            
+        } else {
+            // Utilisateur non trouvé ou erreur
+            if (result.error === 'user_not_found') {
+                showNotification(`❌ Utilisateur "${username}" non trouvé`, 'error');
+            } else if (result.error === 'self_search') {
+                showNotification('❌ Vous ne pouvez pas vous ajouter vous-même !', 'error');
+            } else {
+                showNotification(`❌ ${result.message || result.error}`, 'error');
+            }
+        }
+        
+    } catch (error) {
+        console.error('❌ Erreur lors de la recherche:', error);
+        showNotification('❌ Erreur de connexion au serveur', 'error');
     }
-    
-    if (friendName.toLowerCase() === currentUser.name.toLowerCase()) {
-        alert('Vous ne pouvez pas vous ajouter vous-même !');
-        return;
-    }
-    
-    console.log('Recherche d\'ami:', friendName);
-    sendFriendRequest(friendName);
 }
 
 async function sendFriendRequest(friendName) {
     console.log('=== ENVOI DEMANDE D\'AMITIÉ ===');
-    console.log('URL:', `${API_BASE_URL}/friends/request`);
-    console.log('Données:', { fromUserId: currentUser.id, fromUserName: currentUser.name, toUserName: friendName });
+    console.log('Envoi demande pour:', friendName);
+    
+    // Désactiver le bouton de recherche temporairement
+    const searchBtn = document.getElementById('searchFriendBtn');
+    const searchInput = document.getElementById('friendSearchInput');
+    if (searchBtn) {
+        searchBtn.disabled = true;
+        searchBtn.textContent = '🔄';
+    }
     
     try {
         const response = await fetch(`${API_BASE_URL}/friends/request`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authToken}`
             },
             body: JSON.stringify({
-                fromUserId: currentUser.id,
-                fromUserName: currentUser.name,
-                toUserName: friendName
+                username: friendName
             })
         });
         
-        console.log('Response status:', response.status);
-        console.log('Response headers:', response.headers);
-        
-        if (!response.ok) {
-            console.error('Erreur HTTP:', response.status);
-            const errorText = await response.text();
-            console.error('Erreur texte:', errorText);
-            showNotification(`❌ Erreur serveur: ${response.status}`, 'error');
-            return;
-        }
-        
         const result = await response.json();
-        console.log('Résultat:', result);
+        console.log('Résultat demande d\'ami:', result);
         
         if (result.success) {
-            document.getElementById('friendSearchInput').value = '';
-            
-            if (result.message === 'request_sent') {
-                showNotification(`✅ Demande d'amitié envoyée à ${friendName}`, 'success');
-            } else if (result.message === 'already_sent') {
-                showNotification(`⏳ Demande déjà envoyée à ${friendName}`, 'info');
-            } else if (result.message === 'user_not_found') {
-                showNotification(`❌ Utilisateur "${friendName}" non trouvé`, 'error');
-            }
-            
-            loadFriendRequests();
+            showNotification(`✅ ${result.message}`, 'success');
+            if (searchInput) searchInput.value = '';
         } else {
-            showNotification(`❌ Erreur: ${result.error}`, 'error');
+            showNotification(`❌ ${result.error}`, 'error');
         }
+        
     } catch (error) {
-        console.error('Erreur lors de l\'envoi de la demande:', error);
-        showNotification('❌ Erreur de connexion', 'error');
+        console.error('❌ Erreur demande d\'ami:', error);
+        showNotification('❌ Erreur lors de l\'envoi de la demande', 'error');
+    } finally {
+        // Réactiver le bouton
+        if (searchBtn) {
+            searchBtn.disabled = false;
+            searchBtn.textContent = '🔎';
+        }
     }
 }
 
-async function loadFriendRequests() {
-    if (!currentUser) return;
+async function loadFriends() {
+    if (!currentUser || !authToken) return;
     
-    console.log('=== CHARGEMENT DEMANDES D\'AMITIÉ ===');
-    console.log('URL:', `${API_BASE_URL}/friends/requests/${currentUser.id}`);
+    console.log('=== CHARGEMENT LISTE D\'AMIS ===');
     
     try {
-        const response = await fetch(`${API_BASE_URL}/friends/requests/${currentUser.id}`);
+        const response = await fetch(`${API_BASE_URL}/friends`, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${authToken}`,
+                'Content-Type': 'application/json'
+            }
+        });
         
         console.log('Response status:', response.status);
         
@@ -498,710 +1246,304 @@ async function loadFriendRequests() {
         }
         
         const result = await response.json();
-        console.log('Demandes reçues:', result);
+        console.log('Liste d\'amis:', result);
         
         if (result.success) {
-            friendRequests = result.received || [];
-            sentRequests = result.sent || [];
-            displayFriendRequests();
+            // Stocker la liste des amis pour usage futur
+            window.friendsList = result.friends || [];
+            console.log(`✅ ${window.friendsList.length} ami(s) chargé(s)`);
         }
-    } catch (error) {
-        console.error('Erreur lors du chargement des demandes:', error);
+        
+    } catch (error) {        console.error('❌ Erreur lors du chargement des amis:', error);
     }
 }
 
-function displayFriendRequests() {
-    const container = document.getElementById('friendRequestsContainer');
+function displayFriendRequests(requests) {
+    console.log('[DEBUG] displayFriendRequests appelée avec:', requests);
+    const container = document.getElementById('friendRequestsSection');
+    const list = document.getElementById('friendRequestsList');
     
-    if (friendRequests.length === 0) {
-        container.classList.add('hidden');
+    console.log('[DEBUG] Container:', container);
+    console.log('[DEBUG] List:', list);
+    
+    if (!container || !list) {
+        console.error('[DEBUG] Éléments HTML manquants pour les demandes d\'amis');
+        return;
+    }
+      if (!requests || requests.length === 0) {
+        console.log('[DEBUG] Aucune demande, affichage message vide');
+        container.style.display = 'block';
+        list.innerHTML = '<div style="padding: 10px; color: #888; font-style: italic;">Aucune demande d\'amitié</div>';
         return;
     }
     
-    container.classList.remove('hidden');
-    container.innerHTML = '';
+    console.log('[DEBUG] Affichage de', requests.length, 'demandes');
+    container.style.display = 'block';
+    list.innerHTML = '';
     
-    friendRequests.forEach(request => {
-        const requestElement = createFriendRequestElement(request);
-        container.appendChild(requestElement);
+    requests.forEach(req => {
+        const item = document.createElement('div');
+        item.className = 'friend-request';
+        item.innerHTML = `
+            <div class="friend-request-info">
+                <img src="${req.fromUserAvatar || '/img/default-avatar.png'}" alt="${req.fromUserName}">
+                <span class="friend-request-name">${req.fromUserName}</span>
+            </div>
+            <div class="friend-request-actions">
+                <button class="friend-request-btn accept" title="Accepter" onclick="respondToFriendRequest('${req.id}', 'accept')">✓</button>
+                <button class="friend-request-btn decline" title="Refuser" onclick="respondToFriendRequest('${req.id}', 'decline')">✗</button>
+            </div>
+        `;
+        list.appendChild(item);
     });
+    
+    console.log('[DEBUG] Demandes affichées dans le DOM');
 }
 
-function createFriendRequestElement(request) {
-    const div = document.createElement('div');
-    div.className = 'friend-request-item';
+async function loadFriendRequests() {
+    console.log('[DEBUG] === CHARGEMENT DEMANDES D\'AMITIÉ ===');
+    console.log('[DEBUG] currentUser:', currentUser);
+    console.log('[DEBUG] authToken:', authToken ? 'Present' : 'Missing');
     
-    div.innerHTML = `
-        <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=${request.fromUserName}" 
-             alt="Avatar" class="friend-request-avatar">
-        <div class="friend-request-info">
-            <div class="friend-request-name">${request.fromUserName}</div>
-            <div class="friend-request-status">Demande d'amitié</div>
-        </div>
-        <div class="friend-request-actions">
-            <button class="friend-action-btn accept" onclick="respondToFriendRequest('${request.id}', 'accept')">
-                ✅ Accepter
-            </button>
-            <button class="friend-action-btn decline" onclick="respondToFriendRequest('${request.id}', 'decline')">
-                ❌ Refuser
-            </button>
-        </div>
-    `;
+    if (!currentUser || !authToken) {
+        console.log('[DEBUG] Pas de currentUser ou authToken, abandon');
+        return;
+    }
     
-    return div;
+    try {
+        console.log('[DEBUG] Appel API /friends/requests...');
+        const response = await fetch(`${API_BASE_URL}/friends/requests`, {
+            method: 'GET',
+            headers: { 
+                'Authorization': `Bearer ${authToken}`,
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        console.log('[DEBUG] Réponse API status:', response.status);
+        
+        if (!response.ok) {
+            console.error('[DEBUG] Erreur HTTP:', response.status);
+            return;
+        }
+        
+        const data = await response.json();
+        console.log('[DEBUG] Données reçues:', data);
+        
+        if (data.success) {
+            displayFriendRequests(data.requests || []);
+        } else {
+            console.log('[DEBUG] API success=false');
+            displayFriendRequests([]);
+        }
+    } catch (e) {
+        console.error('[DEBUG] Erreur lors du chargement:', e);
+        displayFriendRequests([]);
+    }
 }
 
 async function respondToFriendRequest(requestId, action) {
+    if (!currentUser || !authToken) return;
+    
+    console.log('=== RÉPONSE DEMANDE D\'AMITIÉ ===', requestId, action);
+    
     try {
         const response = await fetch(`${API_BASE_URL}/friends/respond`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authToken}`
             },
-            body: JSON.stringify({
-                requestId: requestId,
-                action: action,
-                userId: currentUser.id
-            })
+            body: JSON.stringify({ requestId, action })
         });
         
-        const result = await response.json();
-        
-        if (result.success) {
-            if (action === 'accept') {
-                showNotification('✅ Demande d\'amitié acceptée !', 'success');
-            } else {
-                showNotification('❌ Demande d\'amitié refusée', 'info');
-            }
+        if (response.ok) {
+            const result = await response.json();
+            console.log('Réponse acceptation/refus:', result);
             
-            loadFriendRequests();
-            loadUsers(); // Recharger la liste des utilisateurs
-        } else {
-            showNotification(`❌ Erreur: ${result.error}`, 'error');
+            // Recharger les demandes et les amis
+            await loadFriendRequests();
+            await loadUsers(); // Recharger la liste des amis dans l'interface
+            
+            if (action === 'accept') {
+                showNotification('✅ Demande d\'ami acceptée', 'success');
+            } else {
+                showNotification('❌ Demande d\'ami refusée', 'info');
+            }
         }
     } catch (error) {
         console.error('Erreur lors de la réponse:', error);
-        showNotification('❌ Erreur de connexion', 'error');
+        showNotification('❌ Erreur lors de la réponse', 'error');
     }
 }
 
-function showNotification(message, type = 'info') {
-    // Créer une notification temporaire
-    const notification = document.createElement('div');
-    notification.className = `notification ${type}`;
-    notification.textContent = message;
-    notification.style.cssText = `
-        position: fixed;
-        top: 20px;
-        right: 20px;
-        background: ${type === 'success' ? '#3ba55c' : type === 'error' ? '#ed4245' : '#5865f2'};
-        color: white;
-        padding: 12px 20px;
-        border-radius: 8px;
-        z-index: 10000;
-        font-weight: 500;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-        animation: slideInRight 0.3s ease-out;
-    `;
-    
-    document.body.appendChild(notification);
-    
-    setTimeout(() => {
-        notification.style.animation = 'slideOutRight 0.3s ease-in';
-        setTimeout(() => {
-            document.body.removeChild(notification);
-        }, 300);
-    }, 3000);
-}
+// === CONNEXION WEBSOCKET POUR TEMPS RÉEL ===
 
-// Gestion des messages
-async function sendMessage() {
-    const messageInput = document.getElementById('messageInput');
-    const content = messageInput.value.trim();
+// Connexion WebSocket sécurisée
+function connectWebSocket() {
+    if (!authToken || !currentUser) {
+        console.log('❌ Impossible de connecter WebSocket: pas d\'authentification');
+        return;    }
     
-    if (!content || !selectedUserId || !currentUser) {
+    if (websocket && websocket.readyState === WebSocket.OPEN) {
+        console.log('✅ WebSocket déjà connecté');
         return;
     }
     
-    // Désactiver temporairement le bouton d'envoi
-    const sendBtn = document.getElementById('sendBtn');
-    sendBtn.disabled = true;
+    console.log('🔌 Connexion WebSocket...');
+    
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsHost = window.location.hostname === 'localhost' ? 'localhost:3001' : window.location.host;
+    const wsUrl = `${wsProtocol}//${wsHost}`;
     
     try {
-        const response = await fetch(`${API_BASE_URL}/messages`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                senderId: currentUser.id,
-                receiverId: selectedUserId,
-                content: content
-            })
-        });
+        websocket = new WebSocket(wsUrl);
         
-        if (!response.ok) {
-            throw new Error(`Erreur HTTP: ${response.status}`);
-        }
-        
-        const result = await response.json();
-          if (result.success) {
-            messageInput.value = '';
-            // Forcer le rechargement des messages en réinitialisant le hash
-            lastMessagesHash = '';
-            await loadMessages();
-        } else {
-            console.error('Erreur lors de l\'envoi:', result.error);
-        }
-        
-    } catch (error) {
-        console.error('Erreur lors de l\'envoi du message:', error);
-        alert('Erreur lors de l\'envoi du message. Vérifiez que le serveur fonctionne.');
-    } finally {
-        // Réactiver le bouton d'envoi
-        sendBtn.disabled = false;
-    }
-}
-
-let lastMessagesHash = '';
-
-async function loadMessages() {
-    if (!selectedUserId || !currentUser) return;
-    
-    try {
-        const response = await fetch(`${API_BASE_URL}/messages/${currentUser.id}/${selectedUserId}`);
-        
-        if (!response.ok) {
-            console.error('Erreur lors du chargement des messages:', response.status);
-            return;
-        }
-        
-        const messages = await response.json();
-        
-        // Créer un hash des messages pour détecter les changements
-        const messagesHash = JSON.stringify(messages.map(m => ({id: m.id, content: m.content, timestamp: m.timestamp})));
-        
-        // Ne pas recharger si les messages n'ont pas changé
-        if (messagesHash === lastMessagesHash) {
-            return;
-        }
-        
-        lastMessagesHash = messagesHash;
-        
-        const chatMessages = document.getElementById('chatMessages');
-        const isScrolledToBottom = chatMessages.scrollHeight - chatMessages.scrollTop <= chatMessages.clientHeight + 5;
-        
-        chatMessages.innerHTML = '';
-        
-        if (messages.length === 0) {
-            chatMessages.innerHTML = `
-                <div class="no-messages">
-                    <p>💬 Commencez la conversation !</p>
-                    <p class="no-chat-helper">Envoyez votre premier message ci-dessous</p>
-                </div>
-            `;
-        } else {
-            messages.forEach(message => {
-                const messageElement = createMessageElement(message);
-                chatMessages.appendChild(messageElement);
-            });
-        }
-        
-        // Faire défiler vers le bas seulement si l'utilisateur était déjà en bas
-        if (isScrolledToBottom) {
-            setTimeout(() => {
-                chatMessages.scrollTop = chatMessages.scrollHeight;
-            }, 50);
-        }
-        
-    } catch (error) {
-        console.error('Erreur lors du chargement des messages:', error);
-    }
-}
-
-function createMessageElement(message) {
-    const div = document.createElement('div');
-    const isOwn = message.senderId === currentUser.id;
-    div.className = `message ${isOwn ? 'own' : 'other'}`;
-    
-    // Ajouter un ID unique pour éviter les doublons
-    div.dataset.messageId = message.id;
-    div.dataset.messageContent = message.content;
-    div.dataset.senderId = message.senderId;
-    
-    const time = new Date(message.timestamp).toLocaleTimeString('fr-FR', {
-        hour: '2-digit',
-        minute: '2-digit'
-    });
-      div.innerHTML = `
-        <div class="message-header">${isOwn ? 'Vous' : message.senderName} • ${time}${message.edited ? ' • (modifié)' : ''}</div>
-        <div class="message-content">${escapeHtml(message.content)}</div>
-    `;
-      // Ajouter l'événement de clic droit seulement pour les messages de l'utilisateur
-    if (isOwn) {
-        div.addEventListener('contextmenu', (e) => {
-            e.preventDefault();
-            // Passer toutes les données du message, pas seulement l'objet message
-            const messageData = {
-                id: message.id,
-                content: message.content,
-                senderId: message.senderId,
-                senderName: message.senderName,
-                timestamp: message.timestamp
-            };
-            showContextMenu(e, messageData);
-        });
-    }
-    
-    return div;
-}
-
-function escapeHtml(text) {
-    const map = {
-        '&': '&amp;',
-        '<': '&lt;',
-        '>': '&gt;',
-        '"': '&quot;',
-        "'": '&#039;'
-    };
-    return text.replace(/[&<>"']/g, function(m) { return map[m]; });
-}
-
-// Polling des messages
-function startMessagesPolling() {
-    if (messagesInterval) {
-        clearInterval(messagesInterval);
-    }
-    
-    messagesInterval = setInterval(() => {
-        if (selectedUserId && currentUser) {
-            loadMessages();
-        }
-        loadUsers(); // Actualiser la liste des utilisateurs
-    }, 1000); // Réduit à 1 seconde pour une meilleure réactivité
-}
-
-// Déconnexion
-function logout() {
-    console.log('=== DÉCONNEXION ===');
-    
-    // Arrêter le polling
-    if (messagesInterval) {
-        clearInterval(messagesInterval);
-        messagesInterval = null;
-    }
-    
-    // Réinitialiser les variables
-    currentUser = null;
-    selectedUserId = null;
-    lastMessagesHash = '';
-    currentEditingMessage = null;
-    
-    // Cacher le profil utilisateur
-    const profileSection = document.getElementById('userProfileSection');
-    if (profileSection) {
-        profileSection.style.display = 'none';
-    }
-    
-    // Réinitialiser l'application
-    initializeApp();
-    
-    // Réinitialiser les champs de connexion
-    const devUsername = document.getElementById('devUsername');
-    if (devUsername) {
-        devUsername.value = '';
-        devUsername.focus();
-    }
-    
-    // Déconnexion de l'authentification
-    authToken = null;
-    localStorage.removeItem('authToken');
-    localStorage.removeItem('currentUser');
-    
-    console.log('=== DÉCONNEXION TERMINÉE ===');
-}
-
-// Vérification du statut d'authentification
-function checkAuthStatus() {
-    // Ici vous pouvez ajouter une logique pour maintenir la session
-    // Pour cette démo, on affiche toujours l'écran de connexion
-}
-
-// Configuration Google Sign-In
-window.onload = function () {
-    if (!isDevelopmentMode && typeof google !== 'undefined') {
-        google.accounts.id.initialize({
-            client_id: "YOUR_GOOGLE_CLIENT_ID", // Remplacez par votre vrai client ID
-            callback: handleCredentialResponse
-        });
-    }
-};
-
-// Fonction pour basculer entre mode dev et production
-function toggleGoogleAuth() {
-    isDevelopmentMode = false;
-    document.querySelector('.dev-login').style.display = 'none';
-    document.querySelector('.google-login').classList.add('active');
-    document.querySelector('.dev-note').style.display = 'none';
-}
-
-// Fonction pour supprimer tous les utilisateurs (mode développement)
-async function clearAllUsers() {
-    try {
-        const response = await fetch(`${API_BASE_URL}/users/clear`, {
-            method: 'DELETE'
-        });
-        const result = await response.json();
-        
-        if (result.success) {
-            console.log('✅ Tous les utilisateurs ont été supprimés');
+        websocket.onopen = function() {
+            console.log('✅ WebSocket connecté');
+            isWebSocketConnected = true;
             
-            // Recharger la liste des utilisateurs
-            loadUsers();
-            
-            // Réinitialiser l'interface
-            selectedUserId = null;
-            const chatHeader = document.getElementById('chatHeaderArea');
-            const messageContainer = document.getElementById('messageInputContainer');
-            const noChatSelected = document.getElementById('noChatSelected');
-            
-            chatHeader.classList.add('hidden');
-            messageContainer.classList.add('hidden');
-            if (noChatSelected) {
-                noChatSelected.classList.remove('hidden');
-            }
-            
-            // Vider la zone de messages
-            document.getElementById('chatMessages').innerHTML = `
-                <div class="no-chat-selected" id="noChatSelected">
-                    <div class="icon">💬</div>
-                    <p>Sélectionnez un joueur pour commencer une conversation</p>
-                    <p class="no-chat-helper">Cliquez sur un profil à gauche pour démarrer le chat</p>
-                </div>
-            `;
-        }
-    } catch (error) {
-        console.error('Erreur lors de la suppression des utilisateurs:', error);
-    }
-}
-
-// Ajouter la fonction au contexte global pour l'utiliser dans la console
-window.clearAllUsers = clearAllUsers;
-
-// Gestion du menu contextuel
-function setupContextMenu() {
-    const contextMenu = document.getElementById('contextMenu');
-    const editBtn = document.getElementById('editMessage');
-    const deleteBtn = document.getElementById('deleteMessage');
-    const editModal = document.getElementById('editModal');
-    const editInput = document.getElementById('editInput');
-    const saveBtn = document.getElementById('saveEdit');
-    const cancelBtn = document.getElementById('cancelEdit');
-    
-    // Fermer le menu contextuel en cliquant ailleurs
-    document.addEventListener('click', () => {
-        hideContextMenu();
-    });    // Éditer le message
-    editBtn.addEventListener('click', () => {
-        console.log('=== BOUTON ÉDITER CLIQUÉ ===');
-        console.log('currentEditingMessage:', currentEditingMessage);
-        
-        if (currentEditingMessage && currentEditingMessage.content) {
-            console.log('Ouverture du modal avec contenu:', currentEditingMessage.content);
-            editInput.value = currentEditingMessage.content;
-            showEditModal();
-        } else {
-            console.error('Message invalide pour édition:', currentEditingMessage);
-            alert('Erreur: impossible de charger le contenu du message');
-        }
-        
-        hideContextMenu();
-    });
-    
-    // Supprimer le message
-    deleteBtn.addEventListener('click', () => {
-        if (currentEditingMessage && confirm('Êtes-vous sûr de vouloir supprimer ce message ?')) {
-            deleteMessage(currentEditingMessage.id);
-        }
-        hideContextMenu();
-    });    // Sauvegarder l'édition
-    saveBtn.addEventListener('click', async (e) => {
-        e.preventDefault();
-        
-        console.log('=== DÉBUT SAUVEGARDE ===');
-        console.log('currentEditingMessage au moment du clic:', currentEditingMessage);
-        
-        const newContent = editInput.value.trim();
-        console.log('Contenu à sauvegarder:', newContent);
-        
-        if (!newContent) {
-            alert('Le message ne peut pas être vide');
-            return;
-        }
-        
-        if (!currentEditingMessage || !currentEditingMessage.id) {
-            console.error('Message non valide:', currentEditingMessage);
-            alert('Erreur: message non sélectionné ou ID manquant');
-            return;
-        }
-        
-        // Désactiver le bouton pendant la sauvegarde
-        saveBtn.disabled = true;
-        saveBtn.textContent = '💾 Sauvegarde...';
-        
-        try {
-            console.log('Appel de editMessage avec ID:', currentEditingMessage.id);
-            await editMessage(currentEditingMessage.id, newContent);
-            hideEditModal();
-        } catch (error) {
-            console.error('Erreur lors de la sauvegarde:', error);
-        } finally {
-            // Réactiver le bouton
-            saveBtn.disabled = false;
-            saveBtn.textContent = '💾 Sauvegarder';
-        }
-        
-        console.log('=== FIN SAUVEGARDE ===');
-    });
-    
-    // Annuler l'édition
-    cancelBtn.addEventListener('click', () => {
-        hideEditModal();
-    });
-    
-    // Fermer le modal en cliquant sur l'arrière-plan
-    editModal.addEventListener('click', (e) => {
-        if (e.target === editModal) {
-            hideEditModal();
-        }
-    });
-    
-    // Envoyer avec Entrée dans le modal (Ctrl+Entrée pour nouvelle ligne)
-    editInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && !e.ctrlKey) {
-            e.preventDefault();
-            saveBtn.click();
-        }
-    });
-}
-
-function showContextMenu(event, message) {
-    const contextMenu = document.getElementById('contextMenu');
-    
-    // S'assurer que currentEditingMessage est bien défini
-    currentEditingMessage = {
-        id: message.id,
-        content: message.content,
-        senderId: message.senderId,
-        senderName: message.senderName || 'Utilisateur',
-        timestamp: message.timestamp
-    };
-    
-    console.log('Menu contextuel pour message:', currentEditingMessage); // Debug
-    
-    contextMenu.style.left = event.pageX + 'px';
-    contextMenu.style.top = event.pageY + 'px';
-    contextMenu.classList.add('show');
-    
-    // Ajuster la position si le menu dépasse l'écran
-    const rect = contextMenu.getBoundingClientRect();
-    if (rect.right > window.innerWidth) {
-        contextMenu.style.left = (event.pageX - rect.width) + 'px';
-    }
-    if (rect.bottom > window.innerHeight) {
-        contextMenu.style.top = (event.pageY - rect.height) + 'px';
-    }
-}
-
-function hideContextMenu() {
-    const contextMenu = document.getElementById('contextMenu');
-    contextMenu.classList.remove('show');
-    // Ne pas réinitialiser currentEditingMessage ici pour garder la référence
-    console.log('Menu contextuel fermé, message toujours en mémoire:', currentEditingMessage?.id);
-}
-
-function showEditModal() {
-    const editModal = document.getElementById('editModal');
-    const editInput = document.getElementById('editInput');
-    
-    console.log('Ouverture du modal d\'édition'); // Debug
-    
-    editModal.classList.add('show');
-    
-    // Focus sur l'input après un délai pour l'animation
-    setTimeout(() => {
-        editInput.focus();
-        editInput.select(); // Sélectionner tout le texte
-    }, 100);
-}
-
-function hideEditModal() {
-    const editModal = document.getElementById('editModal');
-    editModal.classList.remove('show');
-    
-    console.log('Fermeture du modal d\'édition'); // Debug
-    
-    // Ne pas réinitialiser currentEditingMessage ici pour garder la référence
-    // currentEditingMessage = null;
-}
-
-// API pour éditer un message
-async function editMessage(messageId, newContent) {
-    try {
-        console.log('Édition du message:', messageId, newContent); // Debug
-        
-        const response = await fetch(`${API_BASE_URL}/messages/${messageId}`, {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                content: newContent,
+            // Authentification WebSocket
+            websocket.send(JSON.stringify({
+                type: 'auth',
+                token: authToken,
                 userId: currentUser.id
-            })
-        });
+            }));
+        };
         
-        const result = await response.json();
-        console.log('Réponse édition:', result); // Debug
-          if (response.ok && result.success) {
-            // Forcer le rechargement des messages
-            lastMessagesHash = '';
-            await loadMessages();
-            console.log('Message édité avec succès');
-            
-            // Réinitialiser currentEditingMessage après succès
-            currentEditingMessage = null;
-        } else {
-            console.error('Erreur serveur:', result.error);
-            alert('Erreur lors de la modification du message: ' + (result.error || 'Erreur inconnue'));
-        }
-    } catch (error) {
-        console.error('Erreur lors de la modification:', error);
-        alert('Erreur lors de la modification du message');
-    }
-}
-
-// API pour supprimer un message
-async function deleteMessage(messageId) {
-    try {
-        console.log('Suppression du message:', messageId); // Debug
-        
-        const response = await fetch(`${API_BASE_URL}/messages/${messageId}`, {
-            method: 'DELETE',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                userId: currentUser.id
-            })
-        });
-        
-        const result = await response.json();
-        console.log('Réponse suppression:', result); // Debug
-        
-        if (response.ok && result.success) {
-            // Forcer le rechargement des messages
-            lastMessagesHash = '';
-            await loadMessages();
-            console.log('Message supprimé avec succès');
-        } else {
-            console.error('Erreur serveur:', result.error);
-            alert('Erreur lors de la suppression du message: ' + (result.error || 'Erreur inconnue'));
-        }
-    } catch (error) {
-        console.error('Erreur lors de la suppression:', error);
-        alert('Erreur lors de la suppression du message');
-    }
-}
-
-// Configuration du profil utilisateur
-function setupUserProfile() {
-    const profileLogoutBtn = document.getElementById('profileLogoutBtn');
-    
-    if (profileLogoutBtn) {
-        profileLogoutBtn.addEventListener('click', () => {
-            if (confirm('Êtes-vous sûr de vouloir vous déconnecter ?')) {
-                logout();
+        websocket.onmessage = function(event) {
+            try {
+                const message = JSON.parse(event.data);
+                handleWebSocketMessage(message);
+            } catch (error) {
+                console.error('❌ Erreur parsing message WebSocket:', error);
             }
-        });
+        };
+        
+        websocket.onclose = function(event) {
+            console.log('🔌 WebSocket fermé:', event.code, event.reason);
+            isWebSocketConnected = false;
+            websocket = null;
+            
+            // Reconnexion automatique après 3 secondes
+            if (authToken && currentUser) {
+                setTimeout(() => {
+                    console.log('🔄 Tentative de reconnexion WebSocket...');
+                    connectWebSocket();
+                }, 3000);
+            }
+        };
+        
+        websocket.onerror = function(error) {
+            console.error('❌ Erreur WebSocket:', error);
+            isWebSocketConnected = false;
+        };
+        
+    } catch (error) {
+        console.error('❌ Erreur création WebSocket:', error);
     }
 }
 
-// Initialisation de l'interface au chargement
-function initializeApp() {
-    console.log('=== INITIALISATION DE L\'APPLICATION ===');
+// Gestion des messages WebSocket
+function handleWebSocketMessage(message) {
+    console.log('📨 Message WebSocket reçu:', message);
     
-    // S'assurer que l'écran de login est affiché et l'écran de chat caché
-    const loginScreen = document.getElementById('loginScreen');
-    const chatScreen = document.getElementById('chatScreen');
-    
-    if (loginScreen) {
-        loginScreen.classList.remove('hidden');
-        loginScreen.style.display = 'flex';
-        console.log('Écran de login affiché');
-    }
-    
-    if (chatScreen) {
-        chatScreen.classList.add('hidden');
-        chatScreen.style.display = 'none';
-        console.log('Écran de chat caché');
-    }
-    
-    // Réinitialiser les variables
-    currentUser = null;
-    selectedUserId = null;
-    lastMessagesHash = '';
-    currentEditingMessage = null;
-    
-    // Arrêter le polling s'il était en cours
-    if (messagesInterval) {
-        clearInterval(messagesInterval);
-        messagesInterval = null;
-    }
-    
-    // Réinitialiser l'authentification
-    authToken = null;
-    localStorage.removeItem('authToken');
-    localStorage.removeItem('currentUser');
-    
-    console.log('=== INITIALISATION TERMINÉE - ÉCRAN DE LOGIN AFFICHÉ ===');
-}
-function debugElements() {
-    console.log('=== DEBUG ÉLÉMENTS HTML ===');
-    
-    const loginScreen = document.getElementById('loginScreen');
-    const chatScreen = document.getElementById('chatScreen');
-    const chatContainer = document.querySelector('.chat-container');
-    const usersList = document.querySelector('.users-list');
-    
-    console.log('loginScreen:', loginScreen);
-    console.log('chatScreen:', chatScreen);
-    console.log('chatContainer:', chatContainer);
-    console.log('usersList:', usersList);
-    
-    if (chatScreen) {
-        console.log('chatScreen classes:', chatScreen.className);
-        console.log('chatScreen style.display:', chatScreen.style.display);
-        console.log('chatScreen innerHTML length:', chatScreen.innerHTML.length);
+    switch (message.type) {
+        case 'auth_success':
+            console.log('✅ Authentification WebSocket réussie');
+            break;
+            
+        case 'auth_error':
+            console.error('❌ Erreur authentification WebSocket:', message.error);
+            break;
+            
+        case 'friend_request':
+            console.log('👥 Nouvelle demande d\'ami reçue:', message.data);
+            handleFriendRequest(message.data);
+            break;
+            
+        case 'friend_request_accepted':
+            console.log('✅ Demande d\'ami acceptée:', message.data);
+            showNotification('Demande d\'ami acceptée!', 'success');
+            loadFriendsList();
+            break;
+            
+        case 'friend_request_declined':
+            console.log('❌ Demande d\'ami refusée:', message.data);
+            showNotification('Demande d\'ami refusée', 'info');
+            break;
+            
+        case 'new_message':
+            console.log('💬 Nouveau message reçu:', message.data);
+            handleNewMessage(message.data);
+            break;
+            
+        case 'call_offer':
+            console.log('📞 Offre d\'appel reçue:', message.data);
+            handleCallOffer(message.data);
+            break;
+            
+        case 'call_answer':
+            console.log('📞 Réponse d\'appel reçue:', message.data);
+            handleCallAnswer(message.data);
+            break;
+            
+        case 'call_ice_candidate':
+            console.log('🧊 ICE candidate reçu:', message.data);
+            handleIceCandidate(message.data);
+            break;
+            
+        case 'call_ended':
+            console.log('📞 Appel terminé:', message.data);
+            handleCallEnded(message.data);
+            break;
+            
+        default:
+            console.log('❓ Type de message WebSocket non géré:', message.type);
     }
 }
 
-// Appeler le debug après le chargement
-document.addEventListener('DOMContentLoaded', () => {
-    // Initialiser l'application avec l'écran de login
-    initializeApp();
+// Gestion des nouvelles demandes d'amis
+function handleFriendRequest(requestData) {
+    console.log('👥 Traitement demande d\'ami:', requestData);
     
-    // Configurer le mode développement
-    if (isDevelopmentMode) {
-        console.log('Mode développement activé');
-        setupDevelopmentMode();
+    // Afficher une notification
+    showNotification(`Nouvelle demande d'ami de ${requestData.username}`, 'info');
+    
+    // Recharger la liste des demandes d'amis
+    loadFriendRequests();
+    
+    // S'assurer que la section est visible
+    initializeFriendRequestsSection();
+}
+
+// Gestion des nouveaux messages en temps réel
+function handleNewMessage(messageData) {
+    console.log('💬 Nouveau message reçu:', messageData);
+    
+    // Si l'utilisateur est dans la conversation concernée, afficher le message
+    if (selectedUserId && 
+        (messageData.senderId === selectedUserId || messageData.receiverId === selectedUserId)) {
+        
+        // Ajouter le message au cache
+        const conversationKey = getConversationKey(currentUser.id, selectedUserId);
+        if (!messagesCache.has(conversationKey)) {
+            messagesCache.set(conversationKey, []);
+        }
+        messagesCache.get(conversationKey).push(messageData);
+        
+        // Rafraîchir l'affichage de toute la conversation
+        displayMessages(messagesCache.get(conversationKey), conversationKey);
+        
+        // Faire défiler vers le bas
+        const chatContainer = document.getElementById('chat-messages');
+        if (chatContainer) {
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
     }
-      setupContextMenu();
-    setupUserProfile();
-    setupFriendsSystem();
     
-    // Debug après un délai
-    setTimeout(debugElements, 500);
-    
-    console.log('=== CHARGEMENT TERMINÉ ===');
-});
+    // Mettre à jour les indicateurs de nouveaux messages
+    if (typeof updateUnreadIndicators === 'function') {
+        updateUnreadIndicators();
+    }
+}

@@ -3,6 +3,7 @@
 ## 🔧 Script pour arrêter le serveur sur le port 3000
 
 ### Windows (PowerShell)
+
 ```powershell
 # Trouver le processus qui utilise le port 3000
 netstat -ano | findstr :3000
@@ -12,12 +13,14 @@ taskkill /PID <PID> /F
 ```
 
 ### Windows (cmd)
+
 ```cmd
 # Trouver et tuer le processus en une commande
 for /f "tokens=5" %a in ('netstat -ano ^| findstr :3000') do taskkill /PID %a /F
 ```
 
 ### Linux/Mac
+
 ```bash
 # Trouver le processus
 lsof -i :3000
@@ -29,6 +32,7 @@ sudo kill -9 $(lsof -t -i:3000)
 ## 🚀 Scripts de démarrage alternatifs
 
 ### Démarrer sur un port différent
+
 ```bash
 # Port 3001
 PORT=3001 npm start
@@ -38,6 +42,7 @@ PORT=8080 npm start
 ```
 
 ### Arrêt forcé et redémarrage
+
 ```bash
 # Windows PowerShell
 Get-Process -Name "node" | Stop-Process -Force

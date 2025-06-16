@@ -49,10 +49,8 @@
 
                 <div id="authMessage" class="auth-message"></div>
             </div>
-        </div>
-
-        <!-- Interface de messagerie -->
-        <div id="chatScreen" class="screen hidden">            <header class="chat-header">
+        </div>        <!-- Interface de messagerie -->
+        <div id="chatScreen" class="screen">            <header class="chat-header">
                 <div class="user-info">
                     <img id="userAvatar" src="" alt="Avatar" class="avatar">
                     <span id="userName">Joueur</span>
@@ -66,12 +64,13 @@
                             <input type="text" id="friendSearchInput" placeholder="Pseudo d'un ami..." class="friend-search-input">
                             <button id="searchFriendBtn" class="search-friend-btn">🔎</button>
                         </div>
-                        <div id="friendRequestsContainer" class="friend-requests hidden">
-                            <!-- Les demandes d'amitié apparaîtront ici -->
-                        </div>
+                    </div>                    <!-- Demandes d'amis reçues -->
+                    <div id="friendRequestsSection" class="friend-requests-section">
+                        <h4>📬 Demandes d'amitié</h4>
+                        <div id="friendRequestsList" class="friend-requests"></div>
                     </div>
                     
-                    <h3>🎮 Joueurs en ligne</h3>
+                    <h3>👥 Amis</h3>
                     <div id="usersList" class="users"></div>
                     
                     <!-- Profil du joueur connecté -->
@@ -96,6 +95,7 @@
                                 <p>🟢 En ligne</p>
                             </div>
                         </div>                        <div class="chat-actions">
+                            <button id="callBtn" class="action-btn call-btn" title="Démarrer un appel">📞 Appeler</button>
                             <button class="action-btn">🎮 Profil</button>
                             <button class="action-btn">⚙️ Options</button>
                         </div>
@@ -110,8 +110,8 @@
                     </div>
                     
                     <div class="message-input-container hidden" id="messageInputContainer">
-                        <input type="text" id="messageInput" placeholder="Tape ton message de gamer..." maxlength="500">
-                        <button id="sendBtn">                            <span>⚡</span>
+                        <input type="text" id="messageInput" placeholder="Tape ton message de gamer..." maxlength="500">                        <button id="sendBtn">
+                            <span>⚡</span>
                         </button>
                     </div>
                 </div>
@@ -130,6 +130,22 @@
             </div>
         </div>
 
+        <!-- Menu contextuel pour les profils -->
+        <div id="profileContextMenu" class="context-menu">
+            <div class="context-menu-item" id="sendMessageToUser">
+                <span class="icon">💬</span>
+                <span>Envoyer un message</span>
+            </div>
+            <div class="context-menu-item" id="removeFriend">
+                <span class="icon">❌</span>
+                <span>Supprimer l'ami</span>
+            </div>
+            <div class="context-menu-item delete" id="blockUser">
+                <span class="icon">🚫</span>
+                <span>Bloquer</span>
+            </div>
+        </div>
+
         <!-- Modal d'édition -->
         <div id="editModal" class="edit-modal">
             <div class="edit-modal-content">
@@ -138,6 +154,42 @@
                 <div class="edit-buttons">
                     <button id="saveEdit" class="edit-btn save">💾 Sauvegarder</button>
                     <button id="cancelEdit" class="edit-btn cancel">❌ Annuler</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Interface d'appel -->
+        <div id="callInterface" class="call-interface hidden">
+            <div class="call-container">
+                <div class="call-header">
+                    <div class="call-status" id="callStatus">Appel en cours...</div>
+                    <div class="call-timer" id="callTimer">00:00</div>
+                </div>
+                
+                <div class="call-avatar-section">
+                    <img id="callUserAvatar" src="" alt="Avatar" class="call-user-avatar">
+                    <div id="callUserName" class="call-user-name">Utilisateur</div>
+                </div>
+                
+                <div class="call-controls">
+                    <button id="muteBtn" class="call-btn mute" title="Couper le micro">🎤</button>
+                    <button id="videoBtn" class="call-btn video" title="Activer/Désactiver la vidéo">📹</button>
+                    <button id="hangupBtn" class="call-btn hangup" title="Raccrocher">📞</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Notification d'appel entrant -->
+        <div id="incomingCallModal" class="call-modal hidden">
+            <div class="call-modal-content">
+                <div class="incoming-call-info">
+                    <img id="incomingCallAvatar" src="" alt="Avatar" class="incoming-call-avatar">
+                    <div id="incomingCallName" class="incoming-call-name">Utilisateur</div>
+                    <div class="incoming-call-text">vous appelle...</div>
+                </div>
+                <div class="incoming-call-actions">
+                    <button id="acceptCallBtn" class="call-action-btn accept">📞 Accepter</button>
+                    <button id="declineCallBtn" class="call-action-btn decline">❌ Refuser</button>
                 </div>
             </div>
         </div>

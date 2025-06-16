@@ -1,20 +1,23 @@
-# 🎮 GamerChat - Messagerie Gaming Autonome
+# 🎮 GamerChat - Messagerie Gaming Authentifiée
 
-Une plateforme de messagerie moderne et sécurisée, spécialement conçue pour les gamers. **Complètement autonome** - aucune dépendance à Google ou services externes.
+Application de messagerie en temps réel avec système d'authentification complet, conçue pour les gamers avec une interface moderne style Discord.
 
 ## ✨ Fonctionnalités
 
-### 🔐 **Système d'authentification complet**
-- **Inscription/Connexion** avec pseudo, email et mot de passe
-- **Authentification JWT** 100% autonome
-- **Hashage bcrypt** des mots de passe (12 rounds)
-- **Sessions sécurisées** avec tokens personnalisés
+### 🔐 **Système d'authentification sécurisé**
+- **Inscription/Connexion** avec email et mot de passe
+- **Tokens JWT** pour la sécurité
+- **Hashage bcrypt** des mots de passe
+- **Sessions persistantes**
 
-### 💬 **Messagerie moderne**
-- **Chat instantané** entre utilisateurs
-- **Modification et suppression** des messages (clic droit)
-- **Interface Discord-like** avec sidebar et chat central
-- **Avatars automatiques** générés via Dicebear API
+### 💬 **Messagerie en temps réel**
+- **Chat instantané** entre utilisateurs connectés
+- **Modification et suppression** des messages (menu contextuel)
+- **Interface Discord-like** avec sidebar des joueurs
+- **Messages persistants** (24h de conservation)
+
+### 👥 **Système d'amis**
+- **Recherche d'amis** par pseudo
 - **Demandes d'amitié** avec acceptation/refus
 - **Notifications** en temps réel
 - **Liste des joueurs en ligne**
